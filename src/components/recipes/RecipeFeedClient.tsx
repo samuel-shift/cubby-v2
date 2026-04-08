@@ -1,40 +1,29 @@
 "use client";
 
-/**
- * RecipeFeedClient
- * Full recipe generation feed with:
- * - localStorage cache (45min fresh / 4h stale-while-revalidate)
- * - Inventory hash soft-invalidation
- * - Filter sheet (maxCookTime, mealType, difficulty)
- * - Streaming generation via /api/recipes/generate
- * - Save to DB via /api/recipes
- */
-
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import {
   SlidersHorizontal,
+  RefreshCw,
   Clock,
   Users,
-  ChefHat,
   Bookmark,
   BookmarkCheck,
-  RefreshCw,
-  Flame,
+  AlertTriangle,
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface GeneratedRecipe {
   title: string;
   description?: string;
-  mealType?: string;
   difficulty?: string;
   prepTime?: number;
   cookTime?: number;
   servings?: number;
+  mealType?: string;
   cuisine?: string;
   dietaryTags?: string[];
   expiryItemsUsed?: string[];
@@ -46,233 +35,64 @@ interface RecipeCache {
   recipes: GeneratedRecipe[];
   generatedAt: number;
   inventoryHash: string;
-  filters: FilterState;
 }
 
-interface FilterState {
+interface Filters {
   maxCookTime?: number;
   mealType?: string;
   difficulty?: string;
   cookFromFridgeOnly?: boolean;
 }
 
-// ── Constants ─────────────────────────────────────────────────────────────────
+// ─── Cache ────────────────────────────────────────────────────────────────────
 
 const CACHE_KEY = "cubby_recipes_v2";
-const FRESH_MS = 45 * 60 * 1000;   // 45 min
-const STALE_MS = 4 * 60 * 60 * 1000; // 4 h
+const FRESH_MS = 45 * 60 * 1000;
+const STALE_MS = 4 * 60 * 60 * 1000;
 
-const MEAL_TYPES = ["breakfast", "lunch", "dinner", "snack"];
-const DIFFICULTIES = ["Easy", "Medium", "Hard"];
-const COOK_TIMES = [15, 30, 45, 60];
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function hashInventory(items: { name: string }[]): string {
-  return items
-    .map((i) => i.name)
-    .sort()
-    .join("|");
-}
-
-function loadCache(): RecipeCache | null {
+function readCache(): RecipeCache | null {
   try {
     const raw = localStorage.getItem(CACHE_KEY);
-    if (!raw) return null;
-    return JSON.parse(raw) as RecipeCache;
-  } catch {
-    return null;
-  }
+    return raw ? (JSON.parse(raw) as RecipeCache) : null;
+  } catch { return null; }
 }
 
-function saveCache(cache: RecipeCache) {
+function writeCache(recipes: GeneratedRecipe[], inventoryHash: string) {
   try {
-    localStorage.setItem(CACHE_KEY, JSON.stringify(cache));
-  } catch { /* noop */ }
-}
-
-function saveToSession(recipes: GeneratedRecipe[]) {
-  try {
+    localStorage.setItem(CACHE_KEY, JSON.stringify({ recipes, generatedAt: Date.now(), inventoryHash }));
     sessionStorage.setItem("cubby_generated_recipes", JSON.stringify(recipes));
   } catch { /* noop */ }
 }
 
-// ── Skeleton ──────────────────────────────────────────────────────────────────
+// ─── Skeleton ─────────────────────────────────────────────────────────────────
 
 function RecipeCardSkeleton() {
   return (
-    <div className="cubby-card p-5 space-y-3 animate-pulse">
-      <div className="flex items-start justify-between">
-        <div className="flex-1 space-y-2">
-          <div className="h-3 bg-cubby-stone rounded w-16" />
-          <div className="h-5 bg-cubby-stone rounded w-3/4" />
-          <div className="h-3 bg-cubby-stone rounded w-full" />
-        </div>
-        <div className="w-8 h-8 bg-cubby-stone rounded-xl ml-3 flex-shrink-0" />
-      </div>
-      <div className="flex gap-3">
-        <div className="h-3 bg-cubby-stone rounded w-12" />
-        <div className="h-3 bg-cubby-stone rounded w-16" />
-        <div className="h-3 bg-cubby-stone rounded w-10" />
-      </div>
-      <div className="flex gap-1.5">
-        <div className="h-5 bg-cubby-stone rounded-full w-16" />
-        <div className="h-5 bg-cubby-stone rounded-full w-20" />
+    <div className="cubby-card p-4 space-y-3 animate-pulse">
+      <div className="h-4 bg-cubby-stone rounded-full w-3/4" />
+      <div className="h-3 bg-cubby-stone rounded-full w-1/2" />
+      <div className="flex gap-2">
+        <div className="h-6 w-16 bg-cubby-stone rounded-full" />
+        <div className="h-6 w-16 bg-cubby-stone rounded-full" />
       </div>
     </div>
   );
 }
 
-// ── Recipe Card ───────────────────────────────────────────────────────────────
+// ─── Filter Sheet ─────────────────────────────────────────────────────────────
 
-function RecipeCard({
-  recipe,
-  idx,
-  onSave,
-  isSaved,
-}: {
-  recipe: GeneratedRecipe;
-  idx: number;
-  onSave: (recipe: GeneratedRecipe) => Promise<void>;
-  isSaved: boolean;
-}) {
-  const router = useRouter();
-  const totalTime = (recipe.prepTime ?? 0) + (recipe.cookTime ?? 0);
-  const hasExpiry = (recipe.expiryItemsUsed?.length ?? 0) > 0;
-
-  const difficultyColor =
-    recipe.difficulty === "Easy"
-      ? "bg-cubby-lime/40 text-cubby-green"
-      : recipe.difficulty === "Hard"
-      ? "bg-cubby-salmon/40 text-cubby-urgent"
-      : "bg-cubby-stone text-cubby-taupe";
-
-  return (
-    <div
-      className="cubby-card p-5 space-y-3 active:scale-[0.99] transition-transform cursor-pointer"
-      onClick={() => router.push(`/recipes/new?idx=${idx}`)}
-    >
-      {/* Header row */}
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex-1 min-w-0">
-          {recipe.mealType && (
-            <span className="text-[10px] font-black text-cubby-taupe uppercase tracking-wider">
-              {recipe.mealType}
-            </span>
-          )}
-          <h3 className="font-black text-cubby-charcoal text-base leading-tight mt-0.5 truncate">
-            {recipe.title}
-          </h3>
-          {recipe.description && (
-            <p className="text-cubby-taupe text-xs mt-1 line-clamp-2">{recipe.description}</p>
-          )}
-        </div>
-
-        <div className="flex items-center gap-2 flex-shrink-0">
-          {recipe.difficulty && (
-            <span className={cn("text-[10px] font-black px-2 py-0.5 rounded-full", difficultyColor)}>
-              {recipe.difficulty}
-            </span>
-          )}
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onSave(recipe);
-            }}
-            className="w-8 h-8 rounded-xl bg-cubby-stone flex items-center justify-center active:scale-90 transition-transform"
-          >
-            {isSaved ? (
-              <BookmarkCheck className="w-4 h-4 text-cubby-green" />
-            ) : (
-              <Bookmark className="w-4 h-4 text-cubby-taupe" />
-            )}
-          </button>
-        </div>
-      </div>
-
-      {/* Expiry warning */}
-      {hasExpiry && (
-        <div className="flex items-center gap-1.5 bg-cubby-salmon/20 rounded-xl px-3 py-1.5">
-          <Flame className="w-3 h-3 text-cubby-urgent flex-shrink-0" />
-          <p className="text-[11px] font-black text-cubby-urgent">
-            Uses expiring: {recipe.expiryItemsUsed!.join(", ")}
-          </p>
-        </div>
-      )}
-
-      {/* Meta */}
-      <div className="flex items-center gap-4 text-xs text-cubby-taupe">
-        {totalTime > 0 && (
-          <span className="flex items-center gap-1">
-            <Clock className="w-3 h-3" />{totalTime}m
-          </span>
-        )}
-        {recipe.servings && (
-          <span className="flex items-center gap-1">
-            <Users className="w-3 h-3" />{recipe.servings} servings
-          </span>
-        )}
-        {recipe.cuisine && (
-          <span className="flex items-center gap-1">
-            <ChefHat className="w-3 h-3" />{recipe.cuisine}
-          </span>
-        )}
-      </div>
-
-      {/* Dietary tags */}
-      {(recipe.dietaryTags?.length ?? 0) > 0 && (
-        <div className="flex gap-1.5 flex-wrap">
-          {recipe.dietaryTags!.map((tag) => (
-            <span
-              key={tag}
-              className="text-[10px] font-semibold bg-cubby-stone text-cubby-taupe px-2 py-0.5 rounded-full capitalize"
-            >
-              {tag}
-            </span>
-          ))}
-        </div>
-      )}
-
-      {/* Ingredient chips */}
-      <div className="flex gap-1.5 flex-wrap">
-        {recipe.ingredients.slice(0, 5).map((ing) => (
-          <span
-            key={ing.name}
-            className={cn(
-              "text-[10px] font-semibold px-2 py-0.5 rounded-full",
-              ing.inInventory
-                ? "bg-cubby-lime/30 text-cubby-green"
-                : "bg-cubby-stone text-cubby-taupe"
-            )}
-          >
-            {ing.name}
-          </span>
-        ))}
-        {recipe.ingredients.length > 5 && (
-          <span className="text-[10px] font-semibold bg-cubby-stone text-cubby-taupe px-2 py-0.5 rounded-full">
-            +{recipe.ingredients.length - 5} more
-          </span>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ── Filter Sheet ──────────────────────────────────────────────────────────────
-
-function FilterSheet({
-  filters,
-  onChange,
-  onClose,
-  onApply,
-}: {
-  filters: FilterState;
-  onChange: (f: FilterState) => void;
+function FilterSheet({ filters, onChange, onClose }: {
+  filters: Filters;
+  onChange: (f: Filters) => void;
   onClose: () => void;
-  onApply: () => void;
 }) {
+  const [local, setLocal] = useState<Filters>(filters);
+  const timeOptions = [15, 30, 45, 60];
+  const mealTypes = ["breakfast", "lunch", "dinner", "snack"];
+  const difficulties = ["Easy", "Medium", "Hard"];
+
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center">
+    <div className="fixed inset-0 z-40 flex items-end justify-center">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
       <div className="relative bg-cubby-cream rounded-t-3xl w-full max-w-lg p-6 space-y-5 pb-10">
         <div className="flex items-center justify-between">
@@ -282,93 +102,59 @@ function FilterSheet({
           </button>
         </div>
 
-        {/* Cook time */}
         <div className="space-y-2">
-          <p className="text-xs font-black text-cubby-taupe uppercase tracking-wider">Max cook time</p>
+          <p className="text-xs font-black text-cubby-taupe uppercase tracking-wider">Max time</p>
           <div className="flex gap-2 flex-wrap">
-            {COOK_TIMES.map((t) => (
-              <button
-                key={t}
-                onClick={() => onChange({ ...filters, maxCookTime: filters.maxCookTime === t ? undefined : t })}
-                className={cn(
-                  "px-3 py-1.5 rounded-full text-xs font-black transition-colors",
-                  filters.maxCookTime === t
-                    ? "bg-cubby-green text-white"
-                    : "bg-cubby-stone text-cubby-taupe"
-                )}
-              >
+            {timeOptions.map(t => (
+              <button key={t} onClick={() => setLocal(l => ({ ...l, maxCookTime: l.maxCookTime === t ? undefined : t }))}
+                className={cn("px-3 py-1.5 rounded-full text-xs font-black transition-colors",
+                  local.maxCookTime === t ? "bg-cubby-green text-white" : "bg-cubby-stone text-cubby-taupe")}>
                 {t}m
               </button>
             ))}
           </div>
         </div>
 
-        {/* Meal type */}
         <div className="space-y-2">
           <p className="text-xs font-black text-cubby-taupe uppercase tracking-wider">Meal type</p>
           <div className="flex gap-2 flex-wrap">
-            {MEAL_TYPES.map((m) => (
-              <button
-                key={m}
-                onClick={() => onChange({ ...filters, mealType: filters.mealType === m ? undefined : m })}
-                className={cn(
-                  "px-3 py-1.5 rounded-full text-xs font-black capitalize transition-colors",
-                  filters.mealType === m
-                    ? "bg-cubby-green text-white"
-                    : "bg-cubby-stone text-cubby-taupe"
-                )}
-              >
+            {mealTypes.map(m => (
+              <button key={m} onClick={() => setLocal(l => ({ ...l, mealType: l.mealType === m ? undefined : m }))}
+                className={cn("px-3 py-1.5 rounded-full text-xs font-black capitalize transition-colors",
+                  local.mealType === m ? "bg-cubby-green text-white" : "bg-cubby-stone text-cubby-taupe")}>
                 {m}
               </button>
             ))}
           </div>
         </div>
 
-        {/* Difficulty */}
         <div className="space-y-2">
           <p className="text-xs font-black text-cubby-taupe uppercase tracking-wider">Difficulty</p>
           <div className="flex gap-2 flex-wrap">
-            {DIFFICULTIES.map((d) => (
-              <button
-                key={d}
-                onClick={() => onChange({ ...filters, difficulty: filters.difficulty === d ? undefined : d })}
-                className={cn(
-                  "px-3 py-1.5 rounded-full text-xs font-black transition-colors",
-                  filters.difficulty === d
-                    ? "bg-cubby-green text-white"
-                    : "bg-cubby-stone text-cubby-taupe"
-                )}
-              >
+            {difficulties.map(d => (
+              <button key={d} onClick={() => setLocal(l => ({ ...l, difficulty: l.difficulty === d ? undefined : d }))}
+                className={cn("px-3 py-1.5 rounded-full text-xs font-black transition-colors",
+                  local.difficulty === d ? "bg-cubby-green text-white" : "bg-cubby-stone text-cubby-taupe")}>
                 {d}
               </button>
             ))}
           </div>
         </div>
 
-        {/* Fridge only toggle */}
         <div className="flex items-center justify-between">
           <div>
-            <p className="text-sm font-black text-cubby-charcoal">Fridge items only</p>
+            <p className="text-sm font-black text-cubby-charcoal">Fridge only</p>
             <p className="text-xs text-cubby-taupe">Only use what&apos;s in the fridge</p>
           </div>
-          <button
-            onClick={() => onChange({ ...filters, cookFromFridgeOnly: !filters.cookFromFridgeOnly })}
-            className={cn(
-              "w-12 h-6 rounded-full transition-colors relative",
-              filters.cookFromFridgeOnly ? "bg-cubby-green" : "bg-cubby-stone"
-            )}
-          >
-            <div className={cn(
-              "absolute top-1 w-4 h-4 rounded-full bg-white transition-transform",
-              filters.cookFromFridgeOnly ? "translate-x-7" : "translate-x-1"
-            )} />
+          <button onClick={() => setLocal(l => ({ ...l, cookFromFridgeOnly: !l.cookFromFridgeOnly }))}
+            className={cn("w-12 h-6 rounded-full transition-colors relative", local.cookFromFridgeOnly ? "bg-cubby-green" : "bg-cubby-stone")}>
+            <div className={cn("absolute top-1 w-4 h-4 rounded-full bg-white transition-transform",
+              local.cookFromFridgeOnly ? "translate-x-7" : "translate-x-1")} />
           </button>
         </div>
 
-        <button
-          onClick={onApply}
-          className="w-full bg-cubby-green text-white py-4 rounded-2xl font-black text-base"
-        >
+        <button onClick={() => { onChange(local); onClose(); }}
+          className="w-full bg-cubby-green text-white py-3.5 rounded-2xl font-black text-sm">
           Apply filters
         </button>
       </div>
@@ -376,155 +162,175 @@ function FilterSheet({
   );
 }
 
-// ── Main Component ────────────────────────────────────────────────────────────
+// ─── Recipe Card ──────────────────────────────────────────────────────────────
+
+function RecipeCard({ recipe, index, onSave, savedTitles }: {
+  recipe: GeneratedRecipe;
+  index: number;
+  onSave: (recipe: GeneratedRecipe) => void;
+  savedTitles: Set<string>;
+}) {
+  const router = useRouter();
+  const totalTime = (recipe.prepTime ?? 0) + (recipe.cookTime ?? 0);
+  const hasExpiry = (recipe.expiryItemsUsed?.length ?? 0) > 0;
+  const isSaved = savedTitles.has(recipe.title);
+
+  const difficultyColor: Record<string, string> = {
+    Easy: "bg-cubby-lime/40 text-cubby-green",
+    Medium: "bg-cubby-salmon/30 text-cubby-urgent",
+    Hard: "bg-red-100 text-red-600",
+  };
+
+  return (
+    <div
+      className="cubby-card p-4 space-y-3 active:scale-[0.99] transition-transform cursor-pointer"
+      onClick={() => router.push(`/recipes/new?idx=${index}`)}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-1 flex-wrap">
+            {recipe.difficulty && (
+              <span className={cn("text-[10px] font-black px-2 py-0.5 rounded-full", difficultyColor[recipe.difficulty] ?? "bg-cubby-stone text-cubby-taupe")}>
+                {recipe.difficulty}
+              </span>
+            )}
+            {hasExpiry && (
+              <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-cubby-salmon/30 text-cubby-urgent flex items-center gap-1">
+                <AlertTriangle className="w-2.5 h-2.5" />Uses expiring items
+              </span>
+            )}
+          </div>
+          <p className="font-black text-cubby-charcoal text-base leading-snug">{recipe.title}</p>
+          {recipe.description && (
+            <p className="text-cubby-taupe text-xs mt-1 line-clamp-2">{recipe.description}</p>
+          )}
+        </div>
+        <button
+          onClick={e => { e.stopPropagation(); onSave(recipe); }}
+          className="flex-shrink-0 w-9 h-9 rounded-xl bg-cubby-stone flex items-center justify-center active:scale-90 transition-transform"
+        >
+          {isSaved
+            ? <BookmarkCheck className="w-4 h-4 text-cubby-green" />
+            : <Bookmark className="w-4 h-4 text-cubby-taupe" />}
+        </button>
+      </div>
+
+      <div className="flex items-center gap-3 text-xs text-cubby-taupe">
+        {totalTime > 0 && <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{totalTime}m</span>}
+        {recipe.servings && <span className="flex items-center gap-1"><Users className="w-3 h-3" />{recipe.servings}</span>}
+        {recipe.mealType && <span className="capitalize">{recipe.mealType}</span>}
+        {recipe.cuisine && <span>{recipe.cuisine}</span>}
+      </div>
+
+      {(recipe.dietaryTags?.length ?? 0) > 0 && (
+        <div className="flex gap-1.5 flex-wrap">
+          {recipe.dietaryTags!.map(tag => (
+            <span key={tag} className="text-[10px] font-semibold bg-cubby-stone text-cubby-taupe px-2 py-0.5 rounded-full capitalize">{tag}</span>
+          ))}
+        </div>
+      )}
+
+      <div className="flex gap-1.5 flex-wrap">
+        {recipe.ingredients.slice(0, 5).map((ing, i) => (
+          <span key={i} className={cn("text-[10px] font-semibold px-2 py-0.5 rounded-full",
+            ing.inInventory ? "bg-cubby-lime/30 text-cubby-green" : "bg-cubby-stone text-cubby-taupe")}>
+            {ing.name}
+          </span>
+        ))}
+        {recipe.ingredients.length > 5 && (
+          <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-cubby-stone text-cubby-taupe">
+            +{recipe.ingredients.length - 5} more
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Main Feed ────────────────────────────────────────────────────────────────
 
 export function RecipeFeedClient() {
   const [recipes, setRecipes] = useState<GeneratedRecipe[]>([]);
   const [loading, setLoading] = useState(false);
-  const [loadingMsg, setLoadingMsg] = useState("Finding recipes…");
   const [error, setError] = useState<string | null>(null);
-  const [savedIds, setSavedIds] = useState<Set<number>>(new Set());
   const [showFilters, setShowFilters] = useState(false);
-  const [filters, setFilters] = useState<FilterState>({});
-  const [pendingFilters, setPendingFilters] = useState<FilterState>({});
+  const [filters, setFilters] = useState<Filters>({});
+  const [savedTitles, setSavedTitles] = useState<Set<string>>(new Set());
   const abortRef = useRef<AbortController | null>(null);
 
-  const generate = useCallback(async (opts: { filters: FilterState; force?: boolean }) => {
-    // Cancel any in-flight request
-    abortRef.current?.abort();
-    const abort = new AbortController();
-    abortRef.current = abort;
-
-    setLoading(true);
-    setError(null);
-    setLoadingMsg("Checking your pantry…");
-
-    try {
-      // Check cache
-      if (!opts.force) {
-        const cache = loadCache();
-        if (cache) {
-          const age = Date.now() - cache.generatedAt;
-          const filtersMatch = JSON.stringify(cache.filters) === JSON.stringify(opts.filters);
-          if (age < FRESH_MS && filtersMatch) {
-            setRecipes(cache.recipes);
-            saveToSession(cache.recipes);
-            setLoading(false);
-            return;
-          }
-          // Stale — show cached immediately, refresh in background
-          if (age < STALE_MS && filtersMatch) {
-            setRecipes(cache.recipes);
-            saveToSession(cache.recipes);
-          }
+  const generate = useCallback(async (opts: { filters: Filters; force?: boolean }) => {
+    if (!opts.force) {
+      const cache = readCache();
+      if (cache) {
+        const age = Date.now() - cache.generatedAt;
+        if (age < FRESH_MS) {
+          setRecipes(cache.recipes);
+          try { sessionStorage.setItem("cubby_generated_recipes", JSON.stringify(cache.recipes)); } catch { /* noop */ }
+          return;
+        }
+        if (age < STALE_MS) {
+          setRecipes(cache.recipes);
+          try { sessionStorage.setItem("cubby_generated_recipes", JSON.stringify(cache.recipes)); } catch { /* noop */ }
+          // fall through to background refresh
         }
       }
+    }
 
-      setLoadingMsg("Generating ideas with AI…");
+    abortRef.current?.abort();
+    abortRef.current = new AbortController();
+    setLoading(true);
+    setError(null);
 
+    try {
       const res = await fetch("/api/recipes/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          filters: {
-            maxCookTime: opts.filters.maxCookTime,
-            mealType: opts.filters.mealType,
-            difficulty: opts.filters.difficulty,
-          },
+          filters: { maxCookTime: opts.filters.maxCookTime, mealType: opts.filters.mealType, difficulty: opts.filters.difficulty },
           cookFromFridgeOnly: opts.filters.cookFromFridgeOnly ?? false,
           count: 6,
         }),
-        signal: abort.signal,
+        signal: abortRef.current.signal,
       });
 
       if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error ?? "Failed to generate recipes");
+        const err = await res.json().catch(() => ({})) as { error?: string };
+        throw new Error(err.error ?? "Generation failed");
       }
 
-      // Read stream and accumulate
       const reader = res.body!.getReader();
       const decoder = new TextDecoder();
       let accumulated = "";
-      const parsed: GeneratedRecipe[] = [];
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
         accumulated += decoder.decode(value, { stream: true });
-
-        // Try to extract complete JSON objects progressively
-        // The model returns a JSON array — extract complete objects as they arrive
-        const arrayMatch = accumulated.match(/\[\s*([\s\S]*)/);
-        if (arrayMatch) {
-          const inner = arrayMatch[1];
-          // Count complete objects by matching balanced braces
-          let depth = 0;
-          let start = -1;
-          const newParsed: GeneratedRecipe[] = [];
-
-          for (let i = 0; i < inner.length; i++) {
-            if (inner[i] === "{") {
-              if (depth === 0) start = i;
-              depth++;
-            } else if (inner[i] === "}") {
-              depth--;
-              if (depth === 0 && start !== -1) {
-                try {
-                  const obj = JSON.parse(inner.slice(start, i + 1));
-                  newParsed.push(obj as GeneratedRecipe);
-                } catch { /* incomplete */ }
-                start = -1;
-              }
-            }
-          }
-
-          if (newParsed.length > parsed.length) {
-            parsed.splice(0, parsed.length, ...newParsed);
-            setRecipes([...parsed]);
-            saveToSession([...parsed]);
-          }
-        }
       }
 
-      // Final parse of complete response
-      try {
-        const match = accumulated.match(/\[[\s\S]*\]/);
-        if (match) {
-          const final: GeneratedRecipe[] = JSON.parse(match[0]);
-          setRecipes(final);
-          saveToSession(final);
+      const jsonMatch = accumulated.match(/\[[\s\S]*\]/);
+      if (!jsonMatch) throw new Error("No JSON in response");
+      const parsed: GeneratedRecipe[] = JSON.parse(jsonMatch[0]);
 
-          // Fetch inventory hash for cache
-          const invRes = await fetch("/api/inventory").catch(() => null);
-          const invHash = invRes
-            ? hashInventory((await invRes.json()).items ?? [])
-            : "";
-
-          saveCache({
-            recipes: final,
-            generatedAt: Date.now(),
-            inventoryHash: invHash,
-            filters: opts.filters,
-          });
-        }
-      } catch { /* noop */ }
+      writeCache(parsed, "");
+      setRecipes(parsed);
     } catch (err: unknown) {
-      if ((err as Error).name === "AbortError") return;
+      if (err instanceof Error && err.name === "AbortError") return;
+      console.error("Recipe gen error:", err);
       setError("Couldn't generate recipes. Try again?");
     } finally {
       setLoading(false);
     }
   }, []);
 
-  // Load on mount
   useEffect(() => {
-    generate({ filters: {} });
-  }, [generate]);
+    generate({ filters });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  const handleSave = async (recipe: GeneratedRecipe, idx: number) => {
-    if (savedIds.has(idx)) return;
-    setSavedIds((prev) => new Set([...prev, idx]));
+  const handleSave = async (recipe: GeneratedRecipe) => {
+    if (savedTitles.has(recipe.title)) return;
+    setSavedTitles(s => new Set([...s, recipe.title]));
     await fetch("/api/recipes", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -545,9 +351,93 @@ export function RecipeFeedClient() {
     });
   };
 
-  const activeFilterCount = [
-    filters.maxCookTime,
-    filters.mealType,
-    filters.difficulty,
-    filters.cookFromFridgeOnly,
-  ].filter(
+  const activeFilterCount = [filters.maxCookTime, filters.mealType, filters.difficulty, filters.cookFromFridgeOnly].filter(Boolean).length;
+
+  return (
+    <div className="pb-24">
+      {/* Header */}
+      <div className="sticky top-0 z-10 bg-cubby-stone px-4 pt-4 pb-3 flex items-center justify-between gap-3">
+        <h1 className="font-black text-cubby-charcoal text-xl flex-1">Recipe Ideas 👩‍🍳</h1>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowFilters(true)}
+            className={cn(
+              "flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-black transition-colors",
+              activeFilterCount > 0 ? "bg-cubby-green text-white" : "bg-cubby-cream text-cubby-taupe"
+            )}
+          >
+            <SlidersHorizontal className="w-3.5 h-3.5" />
+            {activeFilterCount > 0 ? `${activeFilterCount} filter${activeFilterCount > 1 ? "s" : ""}` : "Filter"}
+          </button>
+          <button
+            onClick={() => generate({ filters, force: true })}
+            disabled={loading}
+            className="w-9 h-9 bg-cubby-cream rounded-xl flex items-center justify-center active:scale-90 transition-transform disabled:opacity-40"
+          >
+            <RefreshCw className={cn("w-4 h-4 text-cubby-taupe", loading && "animate-spin")} />
+          </button>
+        </div>
+      </div>
+
+      <div className="px-4 space-y-3 pt-1">
+        {/* Loading */}
+        {loading && recipes.length === 0 && (
+          <>
+            <p className="text-center text-cubby-taupe text-xs py-4 font-semibold">Generating recipes from your ingredients…</p>
+            {[...Array(3)].map((_, i) => <RecipeCardSkeleton key={i} />)}
+          </>
+        )}
+
+        {/* Error */}
+        {error && !loading && (
+          <div className="cubby-card p-6 text-center space-y-3">
+            <p className="text-3xl">😕</p>
+            <p className="font-black text-cubby-charcoal text-sm">{error}</p>
+            <button onClick={() => generate({ filters, force: true })} className="text-cubby-green text-sm font-black">
+              Try again
+            </button>
+          </div>
+        )}
+
+        {/* Cards */}
+        {recipes.length > 0 && (
+          <>
+            {recipes.map((recipe, i) => (
+              <RecipeCard
+                key={recipe.title + i}
+                recipe={recipe}
+                index={i}
+                onSave={handleSave}
+                savedTitles={savedTitles}
+              />
+            ))}
+            <button
+              onClick={() => generate({ filters, force: true })}
+              disabled={loading}
+              className="w-full py-4 rounded-2xl bg-cubby-cream text-cubby-taupe text-sm font-black flex items-center justify-center gap-2 active:scale-[0.98] transition-transform disabled:opacity-40"
+            >
+              <RefreshCw className={cn("w-4 h-4", loading && "animate-spin")} />
+              {loading ? "Generating…" : "Generate new ideas"}
+            </button>
+          </>
+        )}
+      </div>
+
+      {/* Refresh toast */}
+      {loading && recipes.length > 0 && (
+        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 bg-cubby-charcoal text-white text-xs font-black px-4 py-2 rounded-full flex items-center gap-2 z-20">
+          <RefreshCw className="w-3 h-3 animate-spin" />
+          Refreshing…
+        </div>
+      )}
+
+      {showFilters && (
+        <FilterSheet
+          filters={filters}
+          onChange={f => { setFilters(f); generate({ filters: f, force: true }); }}
+          onClose={() => setShowFilters(false)}
+        />
+      )}
+    </div>
+  );
+}
