@@ -175,8 +175,13 @@ model SavedRecipe {
   servings    Int?
   ingredients Json     // array of {name, amount, unit}
   instructions Json    // array of steps
-  tags        String[]
+ tags        String[]
   sourceUrl   String?
+  prepTime    Int?
+  difficulty  String?
+  mealType    String?
+  cuisine     String?
+  source      String   @default("user_created")
 
   user        User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
