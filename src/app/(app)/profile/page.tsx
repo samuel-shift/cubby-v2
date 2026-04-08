@@ -1,36 +1,18 @@
-/**
- * Profile / Settings Page
- * Accessible via header avatar — not a bottom nav tab.
- * Unaffected by redesign — apply new design tokens only.
- */
 import { PageHeader } from "@/components/ui/PageHeader";
-import { auth } from "@/auth";
+import { UserCircle } from "lucide-react";
 
-export default async function ProfilePage() {
-  const session = await auth();
-
+export default function ProfilePage() {
   return (
     <div className="min-h-screen bg-cubby-stone">
       <PageHeader title="Profile" backHref="/" />
-      <div className="px-4 pt-4">
-        <div className="cubby-card p-5 space-y-4">
-          <div className="flex items-center gap-4">
-            {/* Avatar */}
-            <div className="w-16 h-16 rounded-full bg-cubby-green flex items-center justify-center">
-              <span className="text-white text-2xl font-black">
-                {session?.user?.name?.[0]?.toUpperCase() ?? "C"}
-              </span>
-            </div>
-            <div>
-              <p className="font-black text-cubby-charcoal text-lg">
-                {session?.user?.name ?? "Chef"}
-              </p>
-              <p className="text-cubby-taupe text-sm">{session?.user?.email}</p>
-            </div>
-          </div>
+      <div className="flex flex-col items-center justify-center px-6 pt-24 text-center space-y-4">
+        <div className="w-20 h-20 bg-cubby-cream rounded-full flex items-center justify-center">
+          <UserCircle className="w-9 h-9 text-cubby-green" />
         </div>
-
-        {/* TODO: Settings sections — dietary preferences, notifications, account */}
+        <h2 className="font-black text-cubby-charcoal text-2xl">Coming soon</h2>
+        <p className="text-cubby-taupe text-sm max-w-xs">
+          Dietary preferences, allergens, notifications, and account settings are coming in the next update.
+        </p>
       </div>
     </div>
   );
