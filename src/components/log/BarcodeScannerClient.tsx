@@ -13,7 +13,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { ScanLine, Flashlight, Check, RefreshCw, KeyboardIcon } from "lucide-react";
+import { ScanLine, Zap, Check, RefreshCw, KeyboardIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PageHeader } from "@/components/ui/PageHeader";
 
@@ -41,7 +41,8 @@ export function BarcodeScannerClient() {
   const router = useRouter();
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const detectorRef = useRef<BarcodeDetector | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const detectorRef = useRef<any>(null);
   const rafRef = useRef<number | null>(null);
   const scannedRef = useRef(false);
 
@@ -77,12 +78,15 @@ export function BarcodeScannerClient() {
 
       // Check for torch
       const track = stream.getVideoTracks()[0];
-      const caps = track.getCapabilities?.() as MediaTrackCapabilities & { torch?: boolean };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const caps = track.getCapabilities?.() as any;
       if (caps?.torch) setHasTorch(true);
 
       // Init BarcodeDetector
       if ("BarcodeDetector" in window) {
-        detectorRef.current = new (window as unknown as { BarcodeDetector: typeof BarcodeDetector }).BarcodeDetector({
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const BD = (window as any).BarcodeDetector;
+        detectorRef.current = new BD({
           formats: ["ean_13", "ean_8", "upc_a", "upc_e", "code_128", "code_39", "qr_code"],
         });
         scanLoop();
@@ -312,7 +316,7 @@ export function BarcodeScannerClient() {
                   torchOn ? "bg-cubby-lime" : "bg-white/20 backdrop-blur-sm"
                 )}
               >
-                <Flashlight className={cn("w-5 h-5", torchOn ? "text-cubby-green" : "text-white")} />
+                <Zap className={cn("w-5 h-5", torchOn ? "text-cubby-green" : "text-white")} />
               </button>
             )}
           </div>
