@@ -336,12 +336,13 @@ export function ManualEntryClient() {
           <label className="text-xs font-black text-cubby-taupe uppercase tracking-wider">
             Expiry date <span className="text-cubby-taupe/50 normal-case font-semibold">(optional)</span>
           </label>
-          <input
-            type="date"
-            value={form.expiryDate}
-            onChange={(e) => set("expiryDate", e.target.value)}
-            className="w-full bg-cubby-stone rounded-xl px-4 py-3 text-cubby-charcoal font-semibold focus:outline-none focus:ring-2 focus:ring-cubby-green text-base"
-          />
+         <input
+  type="date"
+  value={form.expiryDate}
+  onChange={(e) => set("expiryDate", e.target.value)}
+  style={{ WebkitAppearance: "none", appearance: "none" }}
+  className="w-full bg-cubby-stone rounded-xl px-4 py-3 text-cubby-charcoal font-semibold focus:outline-none focus:ring-2 focus:ring-cubby-green text-base"
+/>
 
           {form.expiryDate && (
             <div className="flex gap-2 pt-1">
