@@ -88,6 +88,7 @@ export function KitchenSnapshotClient() {
   });
   const [addedCount, setAddedCount] = useState(0);
   const [processingStatus, setProcessingStatus] = useState("");
+  const [errorType, setErrorType] = useState<"auth" | "empty" | "network">("empty");
 
   const MAX_PHOTOS = 5;
 
@@ -136,13 +137,16 @@ export function KitchenSnapshotClient() {
 
   function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []);
-    const remaining = MAX_PHOTOS - photos.length;
+    const currentCount = photos.length;
+    const remaining = MAX_PHOTOS - currentCount;
     files.slice(0, remaining).forEach((file, i) => {
       const reader = new FileReader();
       reader.onload = (ev) => {
         const dataUrl = ev.target?.result as string;
-        const label = PHOTO_LABELS[photos.length + i] ?? `Photo ${photos.length + i + 1}`;
-        setPhotos((prev) => [...prev, { dataUrl, label }]);
+        setPhotos((prev) => {
+          const label = PHOTO_LABELS[prev.length] ?? `Photo ${prev.length + 1}`;
+          return [...prev, { dataUrl, label }];
+        });
       };
       reader.readAsDataURL(file);
     });
@@ -156,6 +160,8 @@ export function KitchenSnapshotClient() {
     if (photos.length === 0) return;
     setPhase("processing");
     const allItems: SnapshotItem[] = [];
+    let authFailed = false;
+    let networkFailed = false;
 
     for (let i = 0; i < photos.length; i++) {
       setProcessingStatus(`Scanning photo ${i + 1} of ${photos.length}…`);
@@ -166,7 +172,10 @@ export function KitchenSnapshotClient() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ imageBase64: base64, entryType: "snapshot" }),
         });
-        if (!res.ok) continue;
+
+        if (res.status === 401) { authFailed = true; break; }
+        if (!res.ok) { networkFailed = true; continue; }
+
         const data = await res.json();
 
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -186,8 +195,15 @@ export function KitchenSnapshotClient() {
           });
         });
       } catch {
-        // skip failed photo, continue with others
+        networkFailed = true;
+        // continue with other photos
       }
+    }
+
+    if (authFailed) {
+      setErrorType("auth");
+      setPhase("error");
+      return;
     }
 
     // Deduplicate by name (case-insensitive)
@@ -200,6 +216,7 @@ export function KitchenSnapshotClient() {
     });
 
     if (deduped.length === 0) {
+      setErrorType(networkFailed ? "network" : "empty");
       setPhase("error");
       return;
     }
@@ -293,19 +310,34 @@ export function KitchenSnapshotClient() {
   }
 
   if (phase === "error") {
+    const errorMessages = {
+      auth:    { emoji: "🔐", title: "You need to be signed in", body: "Sign in to use the kitchen scanner — it runs on Claude Vision which needs your account." },
+      network: { emoji: "📡", title: "Connection issue", body: "Something went wrong contacting the scanner. Check your connection and try again." },
+      empty:   { emoji: "📷", title: "Couldn't spot anything", body: "Try photos in brighter light, or get closer to the shelves. Make sure food packaging is visible." },
+    };
+    const { emoji, title, body } = errorMessages[errorType];
     return (
       <div className="min-h-screen bg-cubby-stone">
         <PageHeader title="Kitchen snapshot" backHref="/log" />
         <div className="px-4 pt-12 text-center space-y-4">
-          <p className="text-4xl">📷</p>
-          <p className="font-black text-cubby-charcoal text-lg">Couldn&apos;t spot anything</p>
-          <p className="text-cubby-taupe text-sm">Try photos in brighter light, or get closer to the shelves.</p>
-          <button
-            onClick={() => { setPhase("capture"); setPhotos([]); }}
-            className="w-full bg-cubby-green text-white py-3.5 rounded-2xl font-black text-sm flex items-center justify-center gap-2"
-          >
-            <RefreshCw className="w-4 h-4" /> Try again
-          </button>
+          <p className="text-4xl">{emoji}</p>
+          <p className="font-black text-cubby-charcoal text-lg">{title}</p>
+          <p className="text-cubby-taupe text-sm">{body}</p>
+          {errorType === "auth" ? (
+            <Link
+              href="/auth/verify"
+              className="w-full bg-cubby-green text-white py-3.5 rounded-2xl font-black text-sm flex items-center justify-center gap-2"
+            >
+              Sign in to continue
+            </Link>
+          ) : (
+            <button
+              onClick={() => { setPhase("capture"); setPhotos([]); }}
+              className="w-full bg-cubby-green text-white py-3.5 rounded-2xl font-black text-sm flex items-center justify-center gap-2"
+            >
+              <RefreshCw className="w-4 h-4" /> Try again
+            </button>
+          )}
         </div>
       </div>
     );

@@ -18,18 +18,28 @@ const SYSTEM_PROMPTS: Record<string, string> = {
   receipt: `You are a grocery receipt parser. Extract all food items from the receipt image.
 For each item return: name, brand (if visible), quantity (number), unit (if applicable), category.
 Estimate expiry days based on typical shelf life: dairy ~7d, produce ~5d, meat ~3d, bread ~5d, canned ~365d, frozen ~90d.
-Return JSON array: [{name, brand, quantity, unit, category, estimatedExpiryDays, confidence: "high"|"medium"|"low"}]`,
+Return ONLY a valid JSON array, no explanation: [{name, brand, quantity, unit, category, estimatedExpiryDays, confidence: "high"|"medium"|"low"}]`,
 
-  snapshot: `You are a kitchen inventory scanner. Identify all visible food items in the kitchen photo.
-For each item return: name, quantity (estimate), unit, category, storageLocation (fridge/counter/cupboard/pantry).
-Return JSON array: [{name, quantity, unit, category, storageLocation, confidence: "high"|"medium"|"low"}]`,
+  snapshot: `You are a kitchen inventory scanner. Look at this kitchen photo and list every visible food item.
+Be thorough — check shelves, fridge contents, counters, any packaging visible.
+For each item return: name (specific product name), quantity (number estimate), unit (g/ml/items), category (produce/dairy/meat/bakery/frozen/canned/condiment/snacks/drinks/other), storageLocation (fridge/freezer/counter/cupboard/pantry), confidence (high/medium/low).
+Return ONLY a valid JSON array with no explanation or markdown: [{name, quantity, unit, category, storageLocation, confidence}]`,
 
   meal: `You are a meal ingredient identifier. Given a photo of a cooked meal, identify the likely ingredients used.
-Return JSON array of consumed/used items: [{name, quantity, unit, category}]`,
+Return ONLY a valid JSON array, no explanation: [{name, quantity, unit, category}]`,
 
   waste: `You are a food waste logger. Given a photo of food being thrown away, identify the wasted items.
 Estimate the approximate monetary value wasted (GBP).
-Return JSON: {items: [{name, quantity, unit, category, estimatedCost}], totalEstimatedWaste}`,
+Return ONLY valid JSON, no explanation: {items: [{name, quantity, unit, category, estimatedCost}], totalEstimatedWaste}`,
+};
+
+// Use faster haiku model for snapshot (speed > accuracy for inventory scan)
+// Use opus for receipt (accuracy critical for line-item parsing)
+const MODEL_MAP: Record<string, string> = {
+  receipt:  "claude-opus-4-5",
+  snapshot: "claude-haiku-4-5-20251001",
+  meal:     "claude-haiku-4-5-20251001",
+  waste:    "claude-haiku-4-5-20251001",
 };
 
 export async function POST(req: NextRequest) {
@@ -47,8 +57,10 @@ export async function POST(req: NextRequest) {
     ? { type: "base64", media_type: "image/jpeg", data: imageBase64 }
     : { type: "url", url: imageUrl };
 
+  const model = MODEL_MAP[entryType] ?? "claude-haiku-4-5-20251001";
+
   const response = await anthropic.messages.create({
-    model: "claude-opus-4-5",
+    model,
     max_tokens: 1024,
     system: SYSTEM_PROMPTS[entryType],
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

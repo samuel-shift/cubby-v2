@@ -1,0 +1,7 @@
+{
+  "functions": {
+    "src/app/api/log/vision/route.ts": {
+      "maxDuration": 60
+    }
+  }
+}
