@@ -18,8 +18,9 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { cn } from "@/lib/utils";
 import {
-  Leaf, PiggyBank, Clock, Heart, Target, UtensilsCrossed, Mail
+  Leaf, PiggyBank, Clock, Heart, Target, UtensilsCrossed, Mail, Check
 } from "lucide-react";
+import { QUICK_STOCK_ITEMS, type QuickStockItem } from "@/lib/grocery-data";
 
 // ── SSO Provider Buttons ─────────────────────────────────────────────────────
 
@@ -35,7 +36,7 @@ function GoogleIcon() {
 }
 
 
-const TOTAL_STEPS = 6;
+const TOTAL_STEPS = 7;
 
 const DIETARY_OPTIONS = [
   "Vegan", "Vegetarian", "Pescatarian", "Gluten-free", "Dairy-free",
@@ -82,6 +83,8 @@ export function OnboardingClient() {
   const [selectedAllergens, setSelectedAllergens] = useState<string[]>([]);
   const [dietarySearch, setDietarySearch] = useState("");
   const [motivations, setMotivations] = useState<string[]>([]);
+  const [quickStock, setQuickStock] = useState<Set<number>>(new Set());
+  const [stockLoading, setStockLoading] = useState(false);
 
   const goNext = () => {
     setDir(1);
@@ -104,6 +107,15 @@ export function OnboardingClient() {
     goNext();
   };
 
+  const toggleQuickStock = (index: number) => {
+    setQuickStock((prev) => {
+      const next = new Set(prev);
+      if (next.has(index)) next.delete(index);
+      else next.add(index);
+      return next;
+    });
+  };
+
   const handleFinish = async () => {
     setLoading(true);
     await fetch("/api/user/onboarding", {
@@ -111,6 +123,27 @@ export function OnboardingClient() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name, notificationFrequency: notifFreq, dietaryNeeds: selectedDietary, allergens: selectedAllergens, motivations }),
     });
+
+    // If user selected Quick Stock items, add them to inventory
+    if (quickStock.size > 0) {
+      const selectedItems = Array.from(quickStock).map((i) => QUICK_STOCK_ITEMS[i]);
+      await Promise.allSettled(
+        selectedItems.map((item) =>
+          fetch("/api/inventory", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              name: item.name,
+              category: item.category,
+              location: item.location,
+              quantity: 1,
+              entryMethod: "MANUAL",
+            }),
+          })
+        )
+      );
+    }
+
     window.location.href = "/";
   };
 
@@ -120,10 +153,10 @@ export function OnboardingClient() {
 
   return (
     <div className="min-h-screen flex flex-col bg-cubby-stone overflow-hidden">
-      {/* Progress dots */}
-      {step > 1 && (
+      {/* Progress dots (show for steps 2-6, hide on login + welcome) */}
+      {step > 1 && step < TOTAL_STEPS && (
         <div className="flex items-center justify-center gap-2 pt-6">
-          {Array.from({ length: TOTAL_STEPS - 1 }, (_, i) => (
+          {Array.from({ length: TOTAL_STEPS - 2 }, (_, i) => (
             <div
               key={i}
               className={cn(
@@ -313,21 +346,66 @@ export function OnboardingClient() {
               </div>
             )}
 
-            {/* ── Step 6: Welcome ───────────────────────────────────── */}
+            {/* ── Step 6: Quick Stock ──────────────────────────────── */}
             {step === 6 && (
+              <div className="flex-1 flex flex-col space-y-4 overflow-hidden">
+                <div className="text-center space-y-1">
+                  <div className="text-6xl mb-2">🧊</div>
+                  <h1 className="text-page-title text-cubby-charcoal">Stock your Cubby</h1>
+                  <p className="text-cubby-taupe text-sm">Tap everything you have at home right now. We&apos;ll add it to your kitchen.</p>
+                </div>
+
+                <div className="flex flex-wrap gap-2 overflow-y-auto flex-1 pb-2 content-start">
+                  {QUICK_STOCK_ITEMS.map((item, i) => {
+                    const selected = quickStock.has(i);
+                    return (
+                      <button
+                        key={item.name}
+                        onClick={() => toggleQuickStock(i)}
+                        className={cn(
+                          "flex items-center gap-1.5 px-3.5 py-2.5 rounded-2xl text-sm font-black transition-all active:scale-95",
+                          selected
+                            ? "bg-cubby-green text-white shadow-sm"
+                            : "bg-cubby-cream text-cubby-charcoal border border-black/5"
+                        )}
+                      >
+                        <span className="text-base">{item.emoji}</span>
+                        <span>{item.name}</span>
+                        {selected && <Check className="w-3.5 h-3.5 ml-0.5" strokeWidth={3} />}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {quickStock.size > 0 && (
+                  <p className="text-center text-sm font-black text-cubby-green">
+                    {quickStock.size} item{quickStock.size !== 1 ? "s" : ""} selected
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* ── Step 7: Welcome ───────────────────────────────────── */}
+            {step === 7 && (
               <div className="flex-1 flex flex-col justify-center items-center space-y-6 text-center">
                 <div className="text-7xl animate-spring-pop">🎉</div>
                 <div className="space-y-2">
                   <h1 className="text-page-title text-cubby-charcoal">You&apos;re all set, {name || "Chef"}!</h1>
-                  <p className="text-cubby-taupe">Time to add your first item and start saving food.</p>
+                  <p className="text-cubby-taupe">
+                    {quickStock.size > 0
+                      ? `We'll add ${quickStock.size} item${quickStock.size !== 1 ? "s" : ""} to your kitchen. Time to start saving food!`
+                      : "Time to add your first item and start saving food."}
+                  </p>
                 </div>
                 <div className="w-full space-y-3">
-                  <Button onClick={() => window.location.href = "/log"} className="w-full">
-                    Log my first item 🥦
+                  <Button onClick={handleFinish} loading={loading} className="w-full">
+                    {quickStock.size > 0 ? `Let's go! 🚀` : "Log my first item 🥦"}
                   </Button>
-                  <Button variant="ghost" onClick={() => window.location.href = "/"} className="w-full">
-                    Go to my kitchen
-                  </Button>
+                  {quickStock.size === 0 && (
+                    <Button variant="ghost" onClick={handleFinish} loading={loading} className="w-full">
+                      Skip — go to my kitchen
+                    </Button>
+                  )}
                 </div>
               </div>
             )}
@@ -335,18 +413,22 @@ export function OnboardingClient() {
         </AnimatePresence>
       </div>
 
-      {/* Nav buttons (skip step 1 — has its own CTA, skip step 6 — has own CTAs) */}
+      {/* Nav buttons (skip step 1 — has its own CTA, skip step 7 — has own CTAs) */}
       {step > 1 && step < TOTAL_STEPS && (
         <div className="px-6 pb-8 flex items-center justify-between gap-4">
           <button onClick={goBack} className="text-sm font-semibold text-cubby-taupe">
             ← Back
           </button>
           <Button
-            onClick={step === TOTAL_STEPS - 1 ? handleFinish : goNext}
+            onClick={goNext}
             loading={loading}
             className="flex-1"
           >
-            {step === TOTAL_STEPS - 1 ? "Finish" : "Next →"}
+            {step === 6
+              ? quickStock.size > 0
+                ? `Add ${quickStock.size} item${quickStock.size !== 1 ? "s" : ""} →`
+                : "Skip for now →"
+              : "Next →"}
           </Button>
         </div>
       )}
