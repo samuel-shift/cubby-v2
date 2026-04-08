@@ -67,13 +67,28 @@ export function BarcodeScannerClient() {
 
   const startCamera = useCallback(async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } },
-      });
+      // Try rear camera first, fall back to any camera if constraint fails
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } },
+        });
+      } catch {
+        // facingMode failed (common on desktop) — try without constraint
+        stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      }
       streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
+
+      // Attach to video element — video ref is mounted by this point since
+      // the video element renders unconditionally in scanning phase
+      const video = videoRef.current;
+      if (video) {
+        video.srcObject = stream;
+        // Wait for metadata to load before playing (avoids black frame)
+        await new Promise<void>((resolve) => {
+          video.onloadedmetadata = () => resolve();
+        });
+        await video.play();
       }
 
       // Check for torch
@@ -91,7 +106,7 @@ export function BarcodeScannerClient() {
         });
         scanLoop();
       } else {
-        // BarcodeDetector not supported — go straight to manual
+        // BarcodeDetector not supported — go straight to manual entry
         setPhase("not_found");
       }
     } catch {
@@ -244,10 +259,17 @@ export function BarcodeScannerClient() {
         <div className="px-4 pt-16 text-center space-y-4">
           <p className="text-4xl">📷</p>
           <p className="font-black text-cubby-charcoal text-lg">Camera not available</p>
-          <p className="text-cubby-taupe text-sm">Allow camera access or type the item in manually.</p>
+          <p className="text-cubby-taupe text-sm">Allow camera access in your browser settings, or type the item in manually.</p>
+          <button
+            onClick={() => { setCameraError(false); startCamera(); }}
+            className="w-full bg-cubby-green text-white px-6 py-3.5 rounded-2xl font-black text-sm flex items-center justify-center gap-2"
+          >
+            <RefreshCw className="w-4 h-4" />
+            Try again
+          </button>
           <Link
             href="/log/type"
-            className="inline-flex items-center gap-2 bg-cubby-green text-white px-6 py-3.5 rounded-2xl font-black text-sm mt-4"
+            className="inline-flex items-center gap-2 bg-cubby-cream text-cubby-charcoal px-6 py-3.5 rounded-2xl font-black text-sm"
           >
             <KeyboardIcon className="w-4 h-4" />
             Type it in instead
