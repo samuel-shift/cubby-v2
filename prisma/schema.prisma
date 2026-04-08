@@ -1,0 +1,273 @@
+// ─── Cubby V2 — Prisma Schema ─────────────────────────────────────────────────
+// Database: PostgreSQL via Supabase
+// ORM: Prisma 6
+// Auth: NextAuth v5 (Prisma adapter)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ─── NextAuth Models ──────────────────────────────────────────────────────────
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Onboarding
+  onboardingComplete Boolean @default(false)
+
+  // User preferences (from onboarding)
+  dietaryNeeds   String[]  @default([]) // e.g. ["vegan", "gluten-free"]
+  allergens      String[]  @default([]) // e.g. ["nuts", "dairy"]
+  motivations    String[]  @default([]) // e.g. ["save-money", "reduce-waste"]
+  notificationFrequency Int @default(1) // 0-3 slider from onboarding
+
+  // Gamification
+  moneySaved     Float     @default(0)   // £ accumulated
+  streakDays     Int       @default(0)
+  lastActiveDate DateTime?
+
+  // NextAuth relations
+  accounts Account[]
+  sessions Session[]
+
+  // App relations
+  inventoryItems InventoryItem[]
+  recipes        SavedRecipe[]
+  shoppingLists  ShoppingList[]
+  challenges     UserChallenge[]
+  activityLog    ActivityLog[]
+
+  @@map("users")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+// ─── Inventory ────────────────────────────────────────────────────────────────
+
+enum StorageLocation {
+  FRIDGE
+  FREEZER
+  COUNTER
+  CUPBOARD
+  PANTRY
+}
+
+enum ItemStatus {
+  ACTIVE      // In pantry
+  EATEN       // Used up
+  THROWN_OUT  // Wasted
+  STILL_HERE  // Confirmed still present (from swipe status)
+}
+
+enum EntryMethod {
+  BARCODE
+  RECEIPT
+  SNAPSHOT
+  MANUAL
+  EMAIL_RECEIPT
+  MEAL_LOG
+  WASTE_LOG
+}
+
+model InventoryItem {
+  id          String   @id @default(cuid())
+  userId      String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Core fields
+  name        String
+  brand       String?
+  quantity    Float    @default(1)
+  unit        String?  // "g", "ml", "items", etc.
+  category    String   // "dairy", "produce", "meat", etc.
+  categoryEmoji String? // 🥛🥩🥦 — V1 display (photos deferred to V2)
+
+  // Location & expiry
+  location    StorageLocation @default(FRIDGE)
+  purchaseDate DateTime?
+  expiryDate  DateTime?
+  openedDate  DateTime?
+
+  // Barcode / product data (from Open Food Facts)
+  barcode     String?
+  productImageUrl String?  // V2: from OFf when barcode matched
+  nutritionData   Json?
+
+  // Status
+  status      ItemStatus @default(ACTIVE)
+  statusUpdatedAt DateTime?
+  wastedCostEstimate Float? // £ value if thrown out
+
+  // Entry method
+  entryMethod EntryMethod @default(MANUAL)
+  ocrRawText  String?     // Raw OCR/AI output for audit
+
+  // Relationships
+  user        User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+  @@index([userId, expiryDate])
+  @@map("inventory_items")
+}
+
+// ─── Recipes ──────────────────────────────────────────────────────────────────
+
+model SavedRecipe {
+  id          String   @id @default(cuid())
+  userId      String
+  createdAt   DateTime @default(now())
+
+  title       String
+  description String?
+  imageUrl    String?
+  cookTime    Int?     // minutes
+  servings    Int?
+  ingredients Json     // array of {name, amount, unit}
+  instructions Json    // array of steps
+  tags        String[]
+  sourceUrl   String?
+
+  user        User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("saved_recipes")
+}
+
+// ─── Shopping ─────────────────────────────────────────────────────────────────
+
+model ShoppingList {
+  id        String   @id @default(cuid())
+  userId    String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  name      String   @default("My List")
+  items     ShoppingItem[]
+
+  user      User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("shopping_lists")
+}
+
+model ShoppingItem {
+  id             String   @id @default(cuid())
+  shoppingListId String
+  createdAt      DateTime @default(now())
+
+  name           String
+  quantity       Float    @default(1)
+  unit           String?
+  category       String?
+  aisleOrder     Int?     // Smart Aisle Sorting
+  checked        Boolean  @default(false)
+  addedFromRecipe String?  // recipe id if added via Cookbook
+
+  shoppingList   ShoppingList @relation(fields: [shoppingListId], references: [id], onDelete: Cascade)
+
+  @@map("shopping_items")
+}
+
+// ─── Challenges / Gamification ────────────────────────────────────────────────
+
+enum ChallengeType {
+  SWIPE_STATUS       // Built — process all items in swipe flow
+  ZERO_WASTE_WEEK    // Partially built — no waste for 7 days
+  LEFTOVER_LEGEND    // V1 — use leftovers 3x in a week
+  EMPTY_BIN_WEEK     // V1 — zero waste logged for 7 days
+  FRIENDS_FRIDGE     // V2 — social/community (greyed out in UI)
+}
+
+model UserChallenge {
+  id          String   @id @default(cuid())
+  userId      String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  type        ChallengeType
+  startedAt   DateTime?
+  completedAt DateTime?
+  progress    Int      @default(0)  // 0-100
+  streakCount Int      @default(0)
+
+  user        User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, type])
+  @@map("user_challenges")
+}
+
+// ─── Activity Log ─────────────────────────────────────────────────────────────
+
+enum ActivityType {
+  ITEM_ADDED
+  ITEM_EATEN
+  ITEM_THROWN_OUT
+  MEAL_COOKED
+  WASTE_LOGGED
+  SWIPE_SESSION_COMPLETE
+  CHALLENGE_COMPLETE
+  ONBOARDING_COMPLETE
+}
+
+model ActivityLog {
+  id        String       @id @default(cuid())
+  userId    String
+  createdAt DateTime     @default(now())
+
+  type      ActivityType
+  metadata  Json?        // flexible payload per activity type
+
+  user      User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("activity_log")
+}
