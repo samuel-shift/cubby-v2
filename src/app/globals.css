@@ -1,0 +1,113 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── CSS Custom Properties ──────────────────────────────────────────────────
+   Map Tailwind design tokens to CSS vars for use in non-Tailwind contexts
+   (e.g. framer-motion inline styles, SVG fills, etc.)
+   ─────────────────────────────────────────────────────────────────────────── */
+:root {
+  --color-green: #104538;
+  --color-green-light: #1a5c4b;
+  --color-lime: #AEE169;
+  --color-stone: #EFECE5;
+  --color-cream: #FDFBF7;
+  --color-charcoal: #3A3530;
+  --color-taupe: #8C867D;
+  --color-salmon: #E07A5F;
+  --color-urgent: #D94F3B;
+
+  /* Bottom nav height — used to offset page content */
+  --bottom-nav-height: 80px;
+  --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* ─── Base Styles ─────────────────────────────────────────────────────────── */
+@layer base {
+  * {
+    -webkit-tap-highlight-color: transparent;
+    box-sizing: border-box;
+  }
+
+  html {
+    /* Prevent bounce scrolling on iOS */
+    overscroll-behavior: none;
+    /* Smooth scroll */
+    scroll-behavior: smooth;
+  }
+
+  body {
+    background-color: #EFECE5; /* cubby-stone */
+    color: #3A3530; /* cubby-charcoal */
+    font-family: var(--font-geist-sans), system-ui, sans-serif;
+    /* Mobile PWA feel: no overscroll, max width centred */
+    overscroll-behavior: none;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Shadows stripped per gap analysis */
+  * {
+    box-shadow: none !important;
+  }
+
+  /* Allow selective shadow re-enable */
+  .allow-shadow {
+    box-shadow: revert !important;
+  }
+}
+
+/* ─── Component Utilities ─────────────────────────────────────────────────── */
+@layer utilities {
+  /* Safe area padding for devices with notches / home indicators */
+  .pb-safe {
+    padding-bottom: calc(var(--bottom-nav-height) + var(--safe-area-bottom));
+  }
+
+  .pb-nav {
+    padding-bottom: var(--bottom-nav-height);
+  }
+
+  /* Card: white/cream card with ultra-subtle border, no shadow */
+  .cubby-card {
+    @apply bg-cubby-cream border border-black/5 rounded-card;
+  }
+
+  /* Green primary button */
+  .btn-primary {
+    @apply bg-cubby-green text-white font-black rounded-full px-6 py-3 text-base
+           active:scale-95 transition-transform duration-100
+           focus:outline-none focus:ring-2 focus:ring-cubby-green/40;
+  }
+
+  /* Ghost/outline button */
+  .btn-ghost {
+    @apply bg-transparent border border-cubby-charcoal/20 text-cubby-charcoal
+           font-semibold rounded-full px-6 py-3 text-base
+           active:scale-95 transition-transform duration-100;
+  }
+
+  /* Page wrapper: constrained width, full height, overflow hidden */
+  .page-wrapper {
+    @apply min-h-screen max-w-sm mx-auto relative overflow-x-hidden;
+  }
+
+  /* Urgency text tiers */
+  .text-urgent {
+    @apply text-cubby-urgent font-black;
+  }
+  .text-warning {
+    @apply text-cubby-salmon font-semibold;
+  }
+
+  /* Expiry pill */
+  .expiry-pill-critical {
+    @apply bg-cubby-urgent/10 text-cubby-urgent text-xs font-black px-2.5 py-1 rounded-full;
+  }
+  .expiry-pill-warning {
+    @apply bg-cubby-salmon/10 text-cubby-salmon text-xs font-semibold px-2.5 py-1 rounded-full;
+  }
+  .expiry-pill-safe {
+    @apply bg-cubby-lime/20 text-cubby-green text-xs font-semibold px-2.5 py-1 rounded-full;
+  }
+}
