@@ -24,9 +24,11 @@ interface InventoryItem {
   categoryEmoji: string | null;
   location: string;
   expiryDate: string | null;
+  purchaseDate?: string | null;
   quantity: number;
   unit: string | null;
   status: string;
+  [key: string]: unknown;
 }
 
 const LOCATION_LABELS: Record<string, string> = {
