@@ -30,5 +30,15 @@ export default async function PantryPage() {
     },
   });
 
-  return <PantryClient initialItems={items} />;
+  // Serialize Prisma Date objects to ISO strings for client component
+  const serializedItems = items.map((item) => ({
+    ...item,
+    expiryDate: item.expiryDate ? item.expiryDate.toISOString() : null,
+    purchaseDate: item.purchaseDate ? item.purchaseDate.toISOString() : null,
+    createdAt: item.createdAt.toISOString(),
+    updatedAt: item.updatedAt.toISOString(),
+    statusUpdatedAt: item.statusUpdatedAt ? item.statusUpdatedAt.toISOString() : null,
+  }));
+
+  return <PantryClient initialItems={serializedItems} />;
 }
