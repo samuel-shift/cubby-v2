@@ -42,27 +42,23 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid entryType" }, { status: 400 });
   }
 
-  const imageSource = imageBase64
-    ? { type: "base64" as const, media_type: "image/jpeg" as const, data: imageBase64 }
-    : { type: "url" as const, url: imageUrl };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const imageSource: any = imageBase64
+    ? { type: "base64", media_type: "image/jpeg", data: imageBase64 }
+    : { type: "url", url: imageUrl };
 
   const response = await anthropic.messages.create({
     model: "claude-opus-4-5",
     max_tokens: 1024,
     system: SYSTEM_PROMPTS[entryType],
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     messages: [
       {
         role: "user",
         content: [
-          {
-            type: "image",
-            source: imageSource,
-          },
-          {
-            type: "text",
-            text: "Please extract all food items from this image as instructed.",
-          },
-        ],
+          { type: "image", source: imageSource },
+          { type: "text", text: "Please extract all food items from this image as instructed." },
+        ] as any,
       },
     ],
   });
