@@ -10,7 +10,7 @@ generator client {
 datasource db {
   provider  = "postgresql"
   url       = env("DATABASE_URL")
-  directUrl = env("DIRECT_URL")
+  directUrl = env("DIRECT_URL"
 }
 
 // ─── NextAuth Models ──────────────────────────────────────────────────────────
@@ -32,6 +32,7 @@ model User {
   allergens      String[]  @default([]) // e.g. ["nuts", "dairy"]
   motivations    String[]  @default([]) // e.g. ["save-money", "reduce-waste"]
   notificationFrequency Int @default(1) // 0-3 slider from onboarding
+  kitchenSetupComplete Boolean @default(false)
 
   // Gamification
   moneySaved     Float     @default(0)   // £ accumulated
@@ -230,6 +231,7 @@ enum ChallengeType {
   LEFTOVER_LEGEND    // V1 — use leftovers 3x in a week
   EMPTY_BIN_WEEK     // V1 — zero waste logged for 7 days
   FRIENDS_FRIDGE     // V2 — social/community (greyed out in UI)
+  KITCHEN_SETUP      // "Complete Your Kitchen" one-time challenge
 }
 
 model UserChallenge {
