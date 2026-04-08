@@ -8,19 +8,38 @@ import { useEffect, useRef, useState } from "react";
 const COFFEE_GOAL = 70;
 const COFFEE_COST = 3.5;
 
+// Rough value per item saved (eaten rather than binned)
+const VALUE_PER_ITEM = 1.8;
+
 export function MoneySavedTracker() {
-  const [moneySaved] = useState(12.4); // TODO: fetch from user data
+  const [moneySaved, setMoneySaved] = useState<number | null>(null);
   const [animated, setAnimated] = useState(false);
   const barRef = useRef<HTMLDivElement>(null);
 
+  useEffect(() => {
+    fetch("/api/inventory/stats")
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => {
+        if (data?.eatenCount != null) {
+          setMoneySaved(Math.round(data.eatenCount * VALUE_PER_ITEM * 10) / 10);
+        } else {
+          setMoneySaved(0);
+        }
+      })
+      .catch(() => setMoneySaved(0));
+  }, []);
+
+  useEffect(() => {
+    if (moneySaved !== null) {
+      const timer = setTimeout(() => setAnimated(true), 100);
+      return () => clearTimeout(timer);
+    }
+  }, [moneySaved]);
+
+  if (moneySaved === null) return null;
+
   const coffeeCount = Math.floor(moneySaved / COFFEE_COST);
   const progress = Math.min((moneySaved / COFFEE_GOAL) * 100, 100);
-
-  // Animate on mount
-  useEffect(() => {
-    const timer = setTimeout(() => setAnimated(true), 100);
-    return () => clearTimeout(timer);
-  }, []);
 
   return (
     <div className="cubby-card p-5 space-y-3">
@@ -53,7 +72,7 @@ export function MoneySavedTracker() {
             : `That's ${coffeeCount} free coffee${coffeeCount > 1 ? "s" : ""} ☕`}
           {" "}
           <span className="text-cubby-charcoal font-semibold">
-            {formatMoney(COFFEE_GOAL - moneySaved)} to go
+            {formatMoney(Math.max(0, COFFEE_GOAL - moneySaved))} to go
           </span>
         </p>
       </div>
