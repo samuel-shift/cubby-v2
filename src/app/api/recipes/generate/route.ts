@@ -1,8 +1,6 @@
 /**
  * POST /api/recipes/generate
  * Streams AI-generated recipe suggestions based on current inventory.
- * Returns chunked text/plain — each chunk may contain partial JSON.
- * Client accumulates chunks and extracts complete JSON objects.
  */
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
@@ -34,9 +32,10 @@ export async function POST(req: NextRequest) {
     where: {
       userId: session.user.id,
       status: "ACTIVE",
-...(cookFromFridgeOnly ? { location: "FRIDGE" } : {}),    },
-    select: { name: true, quantity: true, unit: true, expiryDate: true, storageLocation: true },
-  select: { name: true, quantity: true, unit: true, expiryDate: true, location: true },
+      ...(cookFromFridgeOnly ? { location: "FRIDGE" } : {}),
+    },
+    select: { name: true, quantity: true, unit: true, expiryDate: true, location: true },
+  });
 
   if (items.length === 0) {
     return NextResponse.json({ error: "No inventory items" }, { status: 400 });
