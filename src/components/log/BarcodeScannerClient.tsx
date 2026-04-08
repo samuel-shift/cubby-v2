@@ -56,6 +56,30 @@ export function BarcodeScannerClient() {
   const [hasTorch, setHasTorch] = useState(false);
   const [cameraError, setCameraError] = useState(false);
   const [lastAdded, setLastAdded] = useState("");
+  // stream stored in state so attaching to video happens reactively after DOM commit
+  const [activeStream, setActiveStream] = useState<MediaStream | null>(null);
+
+  // ─── Attach stream to video reactively once both are available ────────────
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!activeStream || !video) return;
+
+    video.srcObject = activeStream;
+    // play() after metadata is loaded to avoid black frame
+    const handleMetadata = () => {
+      video.play().catch(() => {
+        // play() rejected (e.g. tab hidden) — not fatal
+      });
+    };
+    video.addEventListener("loadedmetadata", handleMetadata);
+    // If metadata already loaded (unlikely but safe)
+    if (video.readyState >= 1) handleMetadata();
+
+    return () => {
+      video.removeEventListener("loadedmetadata", handleMetadata);
+    };
+  }, [activeStream]);
 
   // ─── Camera setup ─────────────────────────────────────────────────────────
 
@@ -63,6 +87,7 @@ export function BarcodeScannerClient() {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
+    setActiveStream(null);
   }, []);
 
   const startCamera = useCallback(async () => {
@@ -78,18 +103,8 @@ export function BarcodeScannerClient() {
         stream = await navigator.mediaDevices.getUserMedia({ video: true });
       }
       streamRef.current = stream;
-
-      // Attach to video element — video ref is mounted by this point since
-      // the video element renders unconditionally in scanning phase
-      const video = videoRef.current;
-      if (video) {
-        video.srcObject = stream;
-        // Wait for metadata to load before playing (avoids black frame)
-        await new Promise<void>((resolve) => {
-          video.onloadedmetadata = () => resolve();
-        });
-        await video.play();
-      }
+      // Trigger the reactive attachment effect
+      setActiveStream(stream);
 
       // Check for torch
       const track = stream.getVideoTracks()[0];
@@ -299,7 +314,6 @@ export function BarcodeScannerClient() {
             {/* Scan target overlay */}
             <div className="absolute inset-0 flex items-center justify-center">
               <div className="relative w-56 h-36">
-                {/* Corner markers */}
                 {["top-left", "top-right", "bottom-left", "bottom-right"].map((corner) => (
                   <div
                     key={corner}
