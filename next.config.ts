@@ -13,12 +13,7 @@ const nextConfig: NextConfig = {
       },
     ],
   },
-  experimental: {
-    // Required for Next Auth v5 beta
-    serverActions: {
-      allowedOrigins: ["localhost:3000"],
-    },
-  },
+  experimental: {},
 };
 
 export default nextConfig;
