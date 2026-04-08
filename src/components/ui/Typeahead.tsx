@@ -1,9 +1,9 @@
 "use client";
 
 /**
- * Typeahead â Autocomplete dropdown for grocery items.
+ * Typeahead — Autocomplete dropdown for grocery items.
  * Shows top matches as the user types. Fires onSelect when a suggestion is tapped.
- * Uses onMouseDown instead of onClick so it fires before the input's onBlur.
+ * Uses both onMouseDown and onTouchEnd to work on desktop and mobile.
  */
 
 import { cn } from "@/lib/utils";
@@ -32,6 +32,12 @@ export function Typeahead({
 
   if (matches.length === 0) return null;
 
+  function handleSelect(e: React.SyntheticEvent, match: string) {
+    e.preventDefault();
+    e.stopPropagation();
+    onSelect(match);
+  }
+
   return (
     <ul
       className={cn(
@@ -42,10 +48,9 @@ export function Typeahead({
       {matches.map((match) => (
         <li key={match}>
           <button
-            onMouseDown={(e) => {
-              e.preventDefault();
-              onSelect(match);
-            }}
+            type="button"
+            onMouseDown={(e) => handleSelect(e, match)}
+            onTouchEnd={(e) => handleSelect(e, match)}
             className="w-full px-4 py-3 text-left text-sm font-semibold text-cubby-charcoal hover:bg-cubby-stone active:bg-cubby-stone transition-colors"
           >
             {match}
