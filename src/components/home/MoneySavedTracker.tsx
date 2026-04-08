@@ -50,7 +50,7 @@ export function MoneySavedTracker() {
         <p className="text-xs text-cubby-taupe">
           {coffeeCount === 0
             ? "Keep going — your first free coffee is coming!"
-            : `That&apos;s ${coffeeCount} free coffee${coffeeCount > 1 ? "s" : ""} ☕`}
+            : `That's ${coffeeCount} free coffee${coffeeCount > 1 ? "s" : ""} ☕`}
           {" "}
           <span className="text-cubby-charcoal font-semibold">
             {formatMoney(COFFEE_GOAL - moneySaved)} to go

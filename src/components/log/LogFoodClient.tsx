@@ -22,7 +22,7 @@ const LOG_OPTIONS = [
     subOptions: [
       { label: "Scan barcode", icon: ScanLine, href: "/log/barcode" },
       { label: "Receipt photo", icon: Receipt, href: "/log/receipt" },
-      { label: "Type it in", icon: KeyboardIcon, href: "/log/barcode?manual=1" },
+      { label: "Type it in", icon: KeyboardIcon, href: "/log/type" },
       {
         label: "Voice input",
         icon: Mic,
@@ -40,7 +40,7 @@ const LOG_OPTIONS = [
     textColor: "text-amber-700",
     subOptions: [
       { label: "Photo of meal", icon: Camera, href: "/log/meal" },
-      { label: "Type it in", icon: KeyboardIcon, href: "/log/meal?manual=1" },
+      { label: "Type it in", icon: KeyboardIcon, href: "/log/meal" },
       {
         label: "Voice input",
         icon: Mic,
@@ -58,7 +58,7 @@ const LOG_OPTIONS = [
     textColor: "text-cubby-urgent",
     subOptions: [
       { label: "Photo of bin", icon: Trash2, href: "/log/waste" },
-      { label: "Type it in", icon: KeyboardIcon, href: "/log/waste?manual=1" },
+      { label: "Type it in", icon: KeyboardIcon, href: "/log/waste" },
     ],
   },
 ];
