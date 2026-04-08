@@ -1,18 +1,5 @@
 /**
  * Home Screen — Dashboard Hub
- *
- * CRITICAL priority per gap analysis. This is a complete rethink from v1.
- *
- * Sections (in order):
- * 1. Header — Cubby logo + notification bell with badge
- * 2. Greeting — "Hello, {name}!" with subtitle
- * 3. Expiry Alert Banners — embedded (NOT behind a tap — see gap analysis note)
- * 4. My Kitchen card — links to /pantry with item count
- * 5. Money Saved Tracker — animated progress bar toward coffee goal
- * 6. Eat Me Soon carousel — flippable tiles, food photos, waste cost, CTAs
- * 7. Recipe Ideas — stacked fan-style inline cards
- * 8. Data Insight — personalised nudge with YES/NO
- * 9. Challenges — Swipe Status, Leftover Legend, Empty Bin Week, Friend's Fridge (greyed out)
  */
 import { auth } from "@/auth";
 import { HomeHeader } from "@/components/home/HomeHeader";
@@ -25,7 +12,7 @@ import { DataInsightNudge } from "@/components/home/DataInsightNudge";
 import { ChallengesSection } from "@/components/home/ChallengesSection";
 
 export default async function HomePage() {
-  const session = await auth();
+  const session = await auth().catch(() => null);
   const userName = session?.user?.name ?? "Chef";
 
   return (
@@ -44,7 +31,7 @@ export default async function HomePage() {
           </p>
         </div>
 
-        {/* Expiry banners — visible without extra tap (gap analysis critical note) */}
+        {/* Expiry banners */}
         <ExpiryBanners />
 
         {/* My Kitchen link card */}
@@ -56,7 +43,7 @@ export default async function HomePage() {
         {/* Eat Me Soon carousel */}
         <EatMeSoonCarousel />
 
-        {/* Recipe ideas — inline on home */}
+        {/* Recipe ideas */}
         <RecipeIdeasFan />
 
         {/* Data insight nudge */}
