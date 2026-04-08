@@ -10,6 +10,557 @@
  */
 
 import { useEffect, useState, useCallback, useRef } from "react";
+"use client";
+
+/**
+ * Shopping Client â Smart Shopping List
+ *
+ * Two tabs:
+ * 1. My List â add/check/delete items with aisle grouping + usage-based suggestions
+ * 2. Cookbook â saved recipes, tap to add all ingredients to list
+ *
+ * Cross-pollination:
+ * - "Frequently bought" items based on inventory history
+ * - "Running low" items based on items eaten/binned recently
+ * - Cookbook recipes auto-populate shopping list ingredients
+ */
+
+import { useState, useEffect, useCallback } from "react";
+import { Plus, BookOpen, ShoppingCart, Trash2, Check, RefreshCw, TrendingUp, Loader2 } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { Typeahead } from "@/components/ui/Typeahead";
+import {
+  GROCERY_SUGGESTIONS,
+  detectCategory,
+  detectAisleOrder,
+} from "@/lib/grocery-data";
+
+interface ShoppingItem {
+  id: string;
+  name: string;
+  quantity: number;
+  unit: string | null;
+  category: string | null;
+  aisleOrder: number | null;
+  checked: boolean;
+  addedFromRecipe: string | null;
+}
+
+interface SavedRecipe {
+  id: string;
+  title: string;
+  description: string | null;
+  cookTime: number | null;
+  servings: number | null;
+  ingredients: Array<{ name: string; amount?: string; unit?: string }>;
+  imageUrl: string | null;
+  difficulty: string | null;
+}
+
+interface SuggestedItem {
+  name: string;
+  reason: string; // "frequently bought" | "running low" | "recipe ingredient"
+  emoji: string;
+}
+
+type Tab = "list" | "cookbook";
+
+const AISLE_LABELS: Record<number, string> = {
+  1: "ð¥¦ Produce",
+  2: "ð¥© Meat & Fish",
+  3: "ð¥ Dairy & Eggs",
+  4: "ð Bakery",
+  5: "ð§ Frozen",
+  6: "ð¥« Dry & Tinned",
+  7: "ð« Sauces & Condiments",
+  8: "ðª Snacks",
+  9: "ð¥¤ Drinks",
+  10: "ð§¹ Household",
+};
+
+export function ShoppingClient() {
+  const [tab, setTab] = useState<Tab>("list");
+  const [items, setItems] = useState<ShoppingItem[]>([]);
+  const [recipes, setRecipes] = useState<SavedRecipe[]>([]);
+  const [suggestions, setSuggestions] = useState<SuggestedItem[]>([]);
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [addingRecipe, setAddingRecipe] = useState<string | null>(null);
+
+  // Fetch shopping list, recipes, and suggestions
+  useEffect(() => {
+    Promise.all([fetchShoppingList(), fetchRecipes(), fetchSuggestions()]).finally(() =>
+      setLoading(false)
+    );
+  }, []);
+
+  async function fetchShoppingList() {
+    try {
+      const res = await fetch("/api/shopping");
+      if (res.ok) {
+        const data = await res.json();
+        setItems(data.items || []);
+      }
+    } catch {}
+  }
+
+  async function fetchRecipes() {
+    try {
+      const res = await fetch("/api/recipes?saved=true");
+      if (res.ok) {
+        const data = await res.json();
+        setRecipes(data);
+      }
+    } catch {}
+  }
+
+  async function fetchSuggestions() {
+    try {
+      const res = await fetch("/api/shopping/suggestions");
+      if (res.ok) {
+        const data = await res.json();
+        setSuggestions(data);
+      }
+    } catch {}
+  }
+
+  const addItem = useCallback(
+    async (name: string) => {
+      if (!name.trim()) return;
+      const category = detectCategory(name);
+      const aisleOrder = detectAisleOrder(name);
+
+      // Optimistic add
+      const tempId = `temp-${Date.now()}`;
+      const newItem: ShoppingItem = {
+        id: tempId,
+        name: name.trim(),
+        quantity: 1,
+        unit: null,
+        category,
+        aisleOrder,
+        checked: false,
+        addedFromRecipe: null,
+      };
+      setItems((prev) => [...prev, newItem]);
+      setInput("");
+
+      try {
+        const res = await fetch("/api/shopping", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: name.trim(),
+            category,
+            aisleOrder,
+          }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setItems((prev) => prev.map((i) => (i.id === tempId ? { ...i, id: data.id } : i)));
+        }
+      } catch {}
+    },
+    []
+  );
+
+  const toggleCheck = useCallback(async (id: string) => {
+    setItems((prev) =>
+      prev.map((i) => (i.id === id ? { ...i, checked: !i.checked } : i))
+    );
+    try {
+      const item = items.find((i) => i.id === id);
+      await fetch(`/api/shopping/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ checked: !item?.checked }),
+      });
+    } catch {}
+  }, [items]);
+
+  const deleteItem = useCallback(async (id: string) => {
+    setItems((prev) => prev.filter((i) => i.id !== id));
+    try {
+      await fetch(`/api/shopping/${id}`, { method: "DELETE" });
+    } catch {}
+  }, []);
+
+  const addRecipeIngredients = useCallback(
+    async (recipe: SavedRecipe) => {
+      setAddingRecipe(recipe.id);
+      const ingredients = recipe.ingredients as Array<{ name: string; amount?: string; unit?: string }>;
+
+      try {
+        // Add each ingredient that isn't already on the list
+        const existingNames = new Set(items.map((i) => i.name.toLowerCase()));
+        const toAdd = ingredients.filter((ing) => !existingNames.has(ing.name.toLowerCase()));
+
+        for (const ing of toAdd) {
+          await fetch("/api/shopping", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              name: ing.name,
+              quantity: 1,
+              unit: ing.unit || null,
+              category: detectCategory(ing.name),
+              aisleOrder: detectAisleOrder(ing.name),
+              addedFromRecipe: recipe.id,
+            }),
+          });
+        }
+
+        // Refresh the list
+        await fetchShoppingList();
+      } catch {} finally {
+        setAddingRecipe(null);
+      }
+    },
+    [items]
+  );
+
+  const addSuggestion = useCallback(
+    (name: string) => {
+      addItem(name);
+      setSuggestions((prev) => prev.filter((s) => s.name !== name));
+    },
+    [addItem]
+  );
+
+  // Group items by aisle
+  const unchecked = items.filter((i) => !i.checked);
+  const checked = items.filter((i) => i.checked);
+  const groupedByAisle = unchecked.reduce<Record<number, ShoppingItem[]>>((acc, item) => {
+    const aisle = item.aisleOrder ?? 10;
+    if (!acc[aisle]) acc[aisle] = [];
+    acc[aisle].push(item);
+    return acc;
+  }, {});
+  const sortedAisles = Object.keys(groupedByAisle)
+    .map(Number)
+    .sort((a, b) => a - b);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-cubby-stone flex items-center justify-center">
+        <Loader2 className="w-6 h-6 text-cubby-green animate-spin" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-cubby-stone pb-32">
+      {/* Header */}
+      <div className="px-4 pt-6 pb-3">
+        <h1 className="text-xl font-black text-cubby-charcoal">Shopping</h1>
+      </div>
+
+      {/* Tabs */}
+      <div className="px-4 flex gap-2 mb-4">
+        <button
+          onClick={() => setTab("list")}
+          className={cn(
+            "flex items-center gap-2 px-4 py-2 rounded-full text-sm font-bold transition-colors",
+            tab === "list"
+              ? "bg-cubby-green text-white"
+              : "bg-cubby-cream text-cubby-taupe"
+          )}
+        >
+          <ShoppingCart className="w-4 h-4" />
+          My List
+          {unchecked.length > 0 && (
+            <span className="bg-white/20 px-1.5 py-0.5 rounded-full text-xs">
+              {unchecked.length}
+            </span>
+          )}
+        </button>
+        <button
+          onClick={() => setTab("cookbook")}
+          className={cn(
+            "flex items-center gap-2 px-4 py-2 rounded-full text-sm font-bold transition-colors",
+            tab === "cookbook"
+              ? "bg-cubby-green text-white"
+              : "bg-cubby-cream text-cubby-taupe"
+          )}
+        >
+          <BookOpen className="w-4 h-4" />
+          Cookbook
+          {recipes.length > 0 && (
+            <span className="bg-white/20 px-1.5 py-0.5 rounded-full text-xs">
+              {recipes.length}
+            </span>
+          )}
+        </button>
+      </div>
+
+      {/* âââ MY LIST TAB âââ */}
+      {tab === "list" && (
+        <div className="px-4 space-y-4">
+          {/* Add item input */}
+          <div className="relative">
+            <div className="flex gap-2">
+              <div className="flex-1 relative">
+                <input
+                  type="text"
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      addItem(input);
+                    }
+                  }}
+                  placeholder="Add an item..."
+                  className="w-full bg-white rounded-xl px-4 py-3 text-cubby-charcoal font-semibold text-sm focus:outline-none focus:ring-2 focus:ring-cubby-green placeholder:text-cubby-taupe/60"
+                />
+                <Typeahead
+                  value={input}
+                  suggestions={GROCERY_SUGGESTIONS}
+                  onSelect={(val) => addItem(val)}
+                />
+              </div>
+              <button
+                onClick={() => addItem(input)}
+                disabled={!input.trim()}
+                className={cn(
+                  "w-12 h-12 rounded-xl flex items-center justify-center transition-colors",
+                  input.trim()
+                    ? "bg-cubby-green text-white"
+                    : "bg-cubby-cream text-cubby-taupe"
+                )}
+              >
+                <Plus className="w-5 h-5" />
+              </button>
+            </div>
+          </div>
+
+          {/* Usage-based suggestions */}
+          {suggestions.length > 0 && (
+            <div>
+              <div className="flex items-center gap-2 mb-2">
+                <TrendingUp className="w-3.5 h-3.5 text-cubby-green" />
+                <p className="text-xs font-bold text-cubby-taupe">Suggested for you</p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {suggestions.slice(0, 8).map((s) => (
+                  <button
+                    key={s.name}
+                    onClick={() => addSuggestion(s.name)}
+                    className="flex items-center gap-1.5 bg-white rounded-full px-3 py-1.5 text-xs font-semibold text-cubby-charcoal active:scale-95 transition-transform border border-black/5"
+                  >
+                    <span>{s.emoji}</span>
+                    <span>{s.name}</span>
+                    <Plus className="w-3 h-3 text-cubby-green" />
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Aisle-grouped items */}
+          {sortedAisles.length === 0 && checked.length === 0 ? (
+            <div className="text-center py-12 space-y-2">
+              <span className="text-4xl">ð</span>
+              <p className="text-sm text-cubby-taupe font-semibold">Your list is empty</p>
+              <p className="text-xs text-cubby-taupe">Add items above or tap Cookbook to add from recipes</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {sortedAisles.map((aisle) => (
+                <div key={aisle}>
+                  <p className="text-xs font-black text-cubby-taupe mb-2">
+                    {AISLE_LABELS[aisle] || `Aisle ${aisle}`}
+                  </p>
+                  <div className="space-y-1.5">
+                    {groupedByAisle[aisle].map((item) => (
+                      <ShoppingItemRow
+                        key={item.id}
+                        item={item}
+                        onToggle={toggleCheck}
+                        onDelete={deleteItem}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ))}
+
+              {/* Checked items */}
+              {checked.length > 0 && (
+                <div>
+                  <p className="text-xs font-black text-cubby-taupe mb-2">
+                    â Done ({checked.length})
+                  </p>
+                  <div className="space-y-1.5 opacity-50">
+                    {checked.map((item) => (
+                      <ShoppingItemRow
+                        key={item.id}
+                        item={item}
+                        onToggle={toggleCheck}
+                        onDelete={deleteItem}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* âââ COOKBOOK TAB âââ */}
+      {tab === "cookbook" && (
+        <div className="px-4 space-y-3">
+          {recipes.length === 0 ? (
+            <div className="text-center py-12 space-y-2">
+              <span className="text-4xl">ð</span>
+              <p className="text-sm text-cubby-taupe font-semibold">No saved recipes yet</p>
+              <p className="text-xs text-cubby-taupe">
+                Save recipes from the Recipes tab and they'll appear here
+              </p>
+              <button
+                onClick={() => (window.location.href = "/recipes")}
+                className="btn-primary mt-3 text-sm px-6 py-2"
+              >
+                Browse Recipes
+              </button>
+            </div>
+          ) : (
+            recipes.map((recipe) => (
+              <RecipeCard
+                key={recipe.id}
+                recipe={recipe}
+                onAddIngredients={addRecipeIngredients}
+                adding={addingRecipe === recipe.id}
+                existingItems={items}
+              />
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ShoppingItemRow({
+  item,
+  onToggle,
+  onDelete,
+}: {
+  item: ShoppingItem;
+  onToggle: (id: string) => void;
+  onDelete: (id: string) => void;
+}) {
+  return (
+    <div className="flex items-center gap-3 bg-white rounded-xl px-3 py-2.5">
+      <button
+        onClick={() => onToggle(item.id)}
+        className={cn(
+          "w-6 h-6 rounded-lg border-2 flex items-center justify-center flex-shrink-0 transition-colors",
+          item.checked
+            ? "bg-cubby-green border-cubby-green"
+            : "border-cubby-taupe/30"
+        )}
+      >
+        {item.checked && <Check className="w-3.5 h-3.5 text-white" strokeWidth={3} />}
+      </button>
+      <span
+        className={cn(
+          "flex-1 text-sm font-semibold",
+          item.checked ? "line-through text-cubby-taupe" : "text-cubby-charcoal"
+        )}
+      >
+        {item.name}
+        {item.addedFromRecipe && (
+          <span className="text-[10px] text-cubby-green ml-1.5">from recipe</span>
+        )}
+      </span>
+      <button
+        onClick={() => onDelete(item.id)}
+        className="text-cubby-taupe/50 hover:text-cubby-urgent transition-colors"
+      >
+        <Trash2 className="w-4 h-4" />
+      </button>
+    </div>
+  );
+}
+
+function RecipeCard({
+  recipe,
+  onAddIngredients,
+  adding,
+  existingItems,
+}: {
+  recipe: SavedRecipe;
+  onAddIngredients: (recipe: SavedRecipe) => void;
+  adding: boolean;
+  existingItems: ShoppingItem[];
+}) {
+  const ingredients = recipe.ingredients as Array<{ name: string }>;
+  const existingNames = new Set(existingItems.map((i) => i.name.toLowerCase()));
+  const alreadyOnList = ingredients.filter((ing) => existingNames.has(ing.name.toLowerCase())).length;
+  const toAdd = ingredients.length - alreadyOnList;
+
+  return (
+    <div className="cubby-card p-4 space-y-3">
+      <div className="flex items-start justify-between">
+        <div>
+          <p className="font-black text-cubby-charcoal text-sm">{recipe.title}</p>
+          {recipe.description && (
+            <p className="text-xs text-cubby-taupe mt-0.5 line-clamp-1">{recipe.description}</p>
+          )}
+          <div className="flex gap-3 mt-1.5 text-xs text-cubby-taupe">
+            {recipe.cookTime && <span>â² {recipe.cookTime}min</span>}
+            {recipe.servings && <span>ð½ {recipe.servings} servings</span>}
+            {recipe.difficulty && <span className="capitalize">ð {recipe.difficulty}</span>}
+          </div>
+        </div>
+      </div>
+
+      {/* Ingredient preview */}
+      <div className="flex flex-wrap gap-1.5">
+        {ingredients.slice(0, 6).map((ing, i) => (
+          <span
+            key={i}
+            className={cn(
+              "text-[11px] px-2 py-0.5 rounded-full font-semibold",
+              existingNames.has(ing.name.toLowerCase())
+                ? "bg-cubby-lime/20 text-cubby-green"
+                : "bg-cubby-stone text-cubby-taupe"
+            )}
+          >
+            {ing.name}
+          </span>
+        ))}
+        {ingredients.length > 6 && (
+          <span className="text-[11px] px-2 py-0.5 rounded-full bg-cubby-stone text-cubby-taupe font-semibold">
+            +{ingredients.length - 6} more
+          </span>
+        )}
+      </div>
+
+      <button
+        onClick={() => onAddIngredients(recipe)}
+        disabled={adding || toAdd === 0}
+        className={cn(
+          "w-full py-2.5 rounded-xl text-sm font-bold transition-colors",
+          toAdd === 0
+            ? "bg-cubby-lime/20 text-cubby-green"
+            : "bg-cubby-green text-white active:scale-[0.98]"
+        )}
+      >
+        {adding ? (
+          <span className="flex items-center justify-center gap-2">
+            <Loader2 className="w-4 h-4 animate-spin" />
+            Adding...
+          </span>
+        ) : toAdd === 0 ? (
+          "All ingredients on list â"
+        ) : (
+          `Add ${toAdd} ingredients to list`
+        )}
+      </button>
+    </div>
+  );
+}
 import { Check, Plus, Trash2, X, ChefHat, ShoppingCart, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Typeahead } from "@/components/ui/Typeahead";
