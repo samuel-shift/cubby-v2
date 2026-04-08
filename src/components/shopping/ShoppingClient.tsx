@@ -12,6 +12,8 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { Check, Plus, Trash2, X, ChefHat, ShoppingCart, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Typeahead } from "@/components/ui/Typeahead";
+import { GROCERY_SUGGESTIONS, detectAisleOrder, detectCategory } from "@/lib/grocery-data";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -169,18 +171,29 @@ export function ShoppingClient() {
 
   // ─── Actions ─────────────────────────────────────────────────────────────
 
+  function handleSelectSuggestion(val: string) {
+    setNewItemName(val);
+    // Auto-detect category and aisle from grocery data
+    const detectedCat = detectCategory(val);
+    if (detectedCat !== "Other") setNewItemCategory(detectedCat);
+  }
+
   async function handleAddItem() {
     if (!newItemName.trim()) return;
     setAddingItem(true);
     try {
+      const name = newItemName.trim();
+      const category = newItemCategory.trim() || detectCategory(name);
+      const aisleOrder = detectAisleOrder(name);
+
       const res = await fetch("/api/shopping", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          name: newItemName.trim(),
+          name,
           quantity: newItemQty,
-          category: newItemCategory.trim() || undefined,
-          aisleOrder: newItemCategory.trim() ? getAisleOrder(newItemCategory.trim()) : undefined,
+          category: category !== "Other" ? category : undefined,
+          aisleOrder,
         }),
       });
       if (!res.ok) return;
@@ -191,7 +204,8 @@ export function ShoppingClient() {
       setNewItemName("");
       setNewItemQty(1);
       setNewItemCategory("");
-      setShowAddForm(false);
+      // Keep form open for quick multi-add
+      inputRef.current?.focus();
     } catch {
       // silent
     } finally {
@@ -419,15 +433,24 @@ export function ShoppingClient() {
                 </button>
               </div>
 
-              <input
-                ref={inputRef}
-                type="text"
-                placeholder="Item name…"
-                value={newItemName}
-                onChange={(e) => setNewItemName(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleAddItem()}
-                className="w-full bg-cubby-stone rounded-xl px-4 py-3 text-cubby-charcoal font-semibold focus:outline-none focus:ring-2 focus:ring-cubby-green text-base placeholder:text-cubby-taupe/50"
-              />
+              <div className="relative">
+                <input
+                  ref={inputRef}
+                  type="text"
+                  placeholder="Item name…"
+                  value={newItemName}
+                  onChange={(e) => setNewItemName(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleAddItem()}
+                  className="w-full bg-cubby-stone rounded-xl px-4 py-3 text-cubby-charcoal font-semibold focus:outline-none focus:ring-2 focus:ring-cubby-green text-base placeholder:text-cubby-taupe/50"
+                  autoComplete="off"
+                />
+                <Typeahead
+                  value={newItemName}
+                  suggestions={GROCERY_SUGGESTIONS}
+                  onSelect={handleSelectSuggestion}
+                  maxResults={5}
+                />
+              </div>
 
               <div className="flex gap-2">
                 {/* Quantity stepper */}
