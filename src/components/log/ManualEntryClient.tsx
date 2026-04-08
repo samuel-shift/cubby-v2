@@ -8,12 +8,14 @@
  * name, brand, quantity, unit, category, location, expiryDate, entryMethod: MANUAL
  */
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, Plus, Minus, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { Typeahead } from "@/components/ui/Typeahead";
+import { GROCERY_SUGGESTIONS, detectStorageLocation, detectCategory } from "@/lib/grocery-data";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -58,6 +60,7 @@ interface FormState {
 
 export function ManualEntryClient() {
   const router = useRouter();
+  const nameInputRef = useRef<HTMLInputElement>(null);
   const [form, setForm] = useState<FormState>({
     name: "",
     brand: "",
@@ -75,6 +78,17 @@ export function ManualEntryClient() {
 
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) =>
     setForm((f) => ({ ...f, [key]: value }));
+
+  function handleSelectSuggestion(val: string) {
+    const location = detectStorageLocation(val);
+    const category = detectCategory(val);
+    setForm((f) => ({
+      ...f,
+      name: val,
+      location,
+      category: category !== "Other" ? category : f.category,
+    }));
+  }
 
   // ─── Validation ─────────────────────────────────────────────────────────────
 
@@ -190,18 +204,28 @@ export function ManualEntryClient() {
           <label className="text-xs font-black text-cubby-taupe uppercase tracking-wider">
             Product name <span className="text-cubby-urgent">*</span>
           </label>
-          <input
-            type="text"
-            value={form.name}
-            onChange={(e) => set("name", e.target.value)}
-            placeholder="e.g. Greek yoghurt"
-            autoFocus
-            className={cn(
-              "w-full bg-cubby-stone rounded-xl px-4 py-3 text-cubby-charcoal font-semibold placeholder:text-cubby-taupe/60",
-              "focus:outline-none focus:ring-2 focus:ring-cubby-green text-base",
-              errors.name && "ring-2 ring-cubby-urgent"
-            )}
-          />
+          <div className="relative">
+            <input
+              ref={nameInputRef}
+              type="text"
+              value={form.name}
+              onChange={(e) => set("name", e.target.value)}
+              placeholder="e.g. Greek yoghurt"
+              autoFocus
+              autoComplete="off"
+              className={cn(
+                "w-full bg-cubby-stone rounded-xl px-4 py-3 text-cubby-charcoal font-semibold placeholder:text-cubby-taupe/60",
+                "focus:outline-none focus:ring-2 focus:ring-cubby-green text-base",
+                errors.name && "ring-2 ring-cubby-urgent"
+              )}
+            />
+            <Typeahead
+              value={form.name}
+              suggestions={GROCERY_SUGGESTIONS}
+              onSelect={handleSelectSuggestion}
+              maxResults={5}
+            />
+          </div>
           {errors.name && (
             <p className="text-xs text-cubby-urgent font-semibold">{errors.name}</p>
           )}
