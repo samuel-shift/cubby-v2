@@ -1,10 +1,14 @@
 /**
- * Home Screen — Dashboard Hub
+ * Home Screen — Inventory-first Dashboard
+ *
+ * Per the V1→V2 gap spec, Home tab = inventory view.
+ * The full inventory system (storage tabs, urgency groups, expiry bars,
+ * swipe actions) is the primary content, with dashboard widgets below.
  */
 import { auth } from "@/auth";
 import { HomeHeader } from "@/components/home/HomeHeader";
 import { ExpiryBanners } from "@/components/home/ExpiryBanners";
-import { MyKitchenCard } from "@/components/home/MyKitchenCard";
+import { InventoryHome } from "@/components/home/InventoryHome";
 import { MoneySavedTracker } from "@/components/home/MoneySavedTracker";
 import { EatMeSoonCarousel } from "@/components/home/EatMeSoonCarousel";
 import { RecipeIdeasFan } from "@/components/home/RecipeIdeasFan";
@@ -31,17 +35,19 @@ export default async function HomePage() {
           </p>
         </div>
 
-        {/* Expiry banners */}
+        {/* Expiry alert banners with recipe CTAs */}
         <ExpiryBanners />
 
-        {/* My Kitchen link card */}
-        <MyKitchenCard />
+        {/* ─── Inventory System (primary content) ─── */}
+        <InventoryHome />
 
-        {/* Money saved tracker */}
-        <MoneySavedTracker />
+        {/* ─── Dashboard widgets below inventory ─── */}
 
         {/* Eat Me Soon carousel */}
         <EatMeSoonCarousel />
+
+        {/* Money saved tracker */}
+        <MoneySavedTracker />
 
         {/* Recipe ideas */}
         <RecipeIdeasFan />
