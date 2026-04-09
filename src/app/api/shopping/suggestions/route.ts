@@ -1,15 +1,17 @@
 /**
  * GET /api/shopping/suggestions
- *
- * Returns smart suggestions for the shopping list based on:
- * 1. Frequently added items (from inventory history)
- * 2. Recently consumed/binned items (running low)
- * 3. Items from saved recipes not in pantry
  */
-
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
+import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
+
+async function getUserId(): Promise<string | null> {
+  const nextAuth = await auth().catch(() => null);
+  if (nextAuth?.user?.id) return nextAuth.user.id;
+  const custom = await getSession();
+  return custom?.userId ?? null;
+}
 
 interface Suggestion {
   name: string;
@@ -36,8 +38,8 @@ const CATEGORY_EMOJI: Record<string, string> = {
 };
 
 export async function GET() {
-  const session = await auth().catch(() => null);
-  if (!session?.user?.id) {
+  const userId = await getUserId();
+  if (!userId) {
     return NextResponse.json([]);
   }
 
@@ -48,10 +50,10 @@ export async function GET() {
     // 1. Recently consumed/binned items — "running low"
     const recentlyUsed = await prisma.inventoryItem.findMany({
       where: {
-        userId: session.user.id,
+        userId,
         status: { in: ["EATEN", "THROWN_OUT"] },
         statusUpdatedAt: {
-          gte: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000), // last 14 days
+          gte: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000),
         },
       },
       select: { name: true, category: true },
@@ -59,12 +61,8 @@ export async function GET() {
       take: 20,
     });
 
-    // Check which of these are NOT currently active in inventory
     const activeItems = await prisma.inventoryItem.findMany({
-      where: {
-        userId: session.user.id,
-        status: "ACTIVE",
-      },
+      where: { userId, status: "ACTIVE" },
       select: { name: true },
     });
     const activeNames = new Set(activeItems.map((i) => i.name.toLowerCase()));
@@ -84,7 +82,7 @@ export async function GET() {
     // 2. Frequently added items (all time, not currently in stock)
     const frequentItems = await prisma.inventoryItem.groupBy({
       by: ["name"],
-      where: { userId: session.user.id },
+      where: { userId },
       _count: { name: true },
       orderBy: { _count: { name: "desc" } },
       take: 30,
@@ -95,9 +93,8 @@ export async function GET() {
       if (!activeNames.has(lower) && !seen.has(lower) && item._count.name >= 2) {
         seen.add(lower);
 
-        // Look up category for emoji
         const sample = await prisma.inventoryItem.findFirst({
-          where: { userId: session.user.id, name: item.name },
+          where: { userId, name: item.name },
           select: { category: true },
         });
 
@@ -111,7 +108,7 @@ export async function GET() {
 
     // 3. Recipe ingredients not in pantry
     const savedRecipes = await prisma.savedRecipe.findMany({
-      where: { userId: session.user.id },
+      where: { userId },
       select: { ingredients: true },
       take: 10,
     });
