@@ -1,21 +1,17 @@
 "use client";
-
 import { useState, useCallback } from "react";
 import { Check, ArrowLeft, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { QUICK_STOCK_ITEMS } from "@/lib/grocery-data";
 import { useRouter } from "next/navigation";
-
 /**
  * KitchenSetupClient — "Complete Your Kitchen" one-time challenge
  */
-
 export function KitchenSetupClient() {
   const router = useRouter();
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [loading, setLoading] = useState(false);
   const [done, setDone] = useState(false);
-
   const toggle = useCallback((idx: number) => {
     setSelected((prev) => {
       const next = new Set(prev);
@@ -24,14 +20,11 @@ export function KitchenSetupClient() {
       return next;
     });
   }, []);
-
   async function handleSubmit() {
     if (selected.size === 0) return;
     setLoading(true);
-
     try {
       const items = Array.from(selected).map((i) => QUICK_STOCK_ITEMS[i]);
-
       await Promise.allSettled(
         items.map((item) =>
           fetch("/api/inventory", {
@@ -47,7 +40,6 @@ export function KitchenSetupClient() {
           })
         )
       );
-
       try {
         await fetch("/api/kitchen-setup", {
           method: "POST",
@@ -57,7 +49,6 @@ export function KitchenSetupClient() {
       } catch {
         // non-critical
       }
-
       setDone(true);
     } catch {
       // silent
@@ -65,7 +56,6 @@ export function KitchenSetupClient() {
       setLoading(false);
     }
   }
-
   if (done) {
     return (
       <div className="min-h-screen bg-cubby-stone flex flex-col items-center justify-center px-6 text-center space-y-6">
@@ -85,7 +75,6 @@ export function KitchenSetupClient() {
       </div>
     );
   }
-
   return (
     <div className="min-h-screen bg-cubby-stone">
       {/* Header */}
@@ -103,9 +92,8 @@ export function KitchenSetupClient() {
           </div>
         </div>
       </div>
-
-      {/* Product grid — pb-40 ensures content scrolls clear of the fixed bottom bar */}
-      <div className="px-4 pb-40">
+      {/* Product grid — pb-52 ensures content scrolls clear of the fixed bottom bar + nav */}
+      <div className="px-4 pb-52">
         <div className="flex flex-wrap gap-2">
           {QUICK_STOCK_ITEMS.map((item, i) => {
             const isSelected = selected.has(i);
@@ -131,9 +119,8 @@ export function KitchenSetupClient() {
           })}
         </div>
       </div>
-
-      {/* Fixed bottom bar — safe-area-inset clears iOS home indicator */}
-      <div className="fixed bottom-0 left-0 right-0 bg-cubby-stone border-t border-black/5 px-4 pt-4 pb-[env(safe-area-inset-bottom,24px)]">
+      {/* Fixed bottom bar — bottom-20 clears the 80px app nav bar */}
+      <div className="fixed bottom-20 left-0 right-0 bg-cubby-stone border-t border-black/5 px-4 pt-4 pb-4">
         {selected.size > 0 && (
           <p className="text-center text-sm font-black text-cubby-green mb-3">
             {selected.size} item{selected.size !== 1 ? "s" : ""} selected
