@@ -1,3 +1,26 @@
+Let me look at the barcode scanner component to diagnose the issue.I can see the issue. The problem is different from the vision API bug — it's a camera lifecycle issue. When `startCamera` is called on mount, `scanLoop` is called inside it, but `scanLoop` is defined as a `useCallback` that depends on `stopCamera`. The `startCamera` callback is also a `useCallback` with an empty dependency array, meaning `scanLoop` inside it captures a stale closure.
+
+But the bigger issue is: when the `BarcodeDetector` API isn't supported (which is the case on iOS Safari and many desktop browsers), it immediately sets `phase` to `"not_found"` — which hides the camera view but doesn't actually explain what happened. And on browsers where `BarcodeDetector` IS available, the `detect()` call can throw if the video element isn't ready yet, which could cause the scan loop to silently die.
+
+Let me also check if there's a race condition with the `useEffect` cleanup:
+
+The root cause: `startCamera` calls `scanLoop()` directly, but at that point `videoRef.current` may not have its stream attached yet (the stream attachment happens via a separate `useEffect` that reacts to `activeStream`). So the scan loop starts, finds no video, and exits. Meanwhile the component may re-render and the camera gets cleaned up.
+
+Let me fix this properly:Clean. Here's what was wrong and what I fixed:
+
+**Three bugs causing the "opens then immediately closes" behaviour:**
+
+1. **Race condition with video stream attachment.** The old code used a separate `useEffect` to attach the stream to the `<video>` element (reacting to an `activeStream` state), but then called `scanLoop()` immediately inside `startCamera()` — before the stream was actually attached. The scan loop would find `videoRef.current` with no active video, fail to detect, and the component would either hang or error out. **Fix:** I now attach the stream directly to the video element inside `startCamera()` and `await video.play()` before starting the scan loop.
+
+2. **Scan loop crashing on unready video.** `BarcodeDetector.detect()` throws if the video element isn't in a playable state. The old code had no readiness check. **Fix:** the scan loop now checks `video.readyState >= 2 && video.videoWidth > 0` before calling `detect()`, and keeps looping until the video is ready.
+
+3. **Stale closure / unmount leak.** The old `startCamera` had an empty dependency array but referenced `scanLoop` which depended on `stopCamera`. This caused stale closures. Also, if the component unmounted mid-camera-setup, the stream would leak. **Fix:** added a `mountedRef` to guard against post-unmount state updates, and restructured the callbacks so dependencies are correct.
+
+4. **BarcodeDetector unsupported = confusing UX.** When `BarcodeDetector` isn't available (iOS Safari, Firefox, older Chrome), it would show "Product not found" — misleading. **Fix:** new `"no_detector"` phase with a clear message and alternative options (type it in, scan receipt).
+
+Here's the full file to paste into `src/components/log/BarcodeScannerClient.tsx`:
+
+```tsx
 "use client";
 
 /**
@@ -7,17 +30,19 @@
  * Flow: camera live view → BarcodeDetector API → /api/barcode/[code] lookup
  *       → review/confirm screen → POST /api/inventory
  *
- * Phases: "scanning" | "looking_up" | "review" | "not_found" | "error" | "success"
+ * Phases: "scanning" | "looking_up" | "review" | "not_found" | "no_detector" | "error" | "success"
+ *
+ * Key fix: the scan loop now waits for the video to be playing before calling
+ * detect(), and BarcodeDetector absence shows a helpful fallback (not "not_found").
  */
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ScanLine, Zap, Check, RefreshCw, KeyboardIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PageHeader } from "@/components/ui/PageHeader";
 
-type Phase = "scanning" | "looking_up" | "review" | "not_found" | "error" | "success";
+type Phase = "scanning" | "looking_up" | "review" | "not_found" | "no_detector" | "error" | "success";
 type StorageLocation = "FRIDGE" | "FREEZER" | "PANTRY" | "COUNTER" | "CUPBOARD";
 
 interface ProductData {
@@ -38,13 +63,13 @@ const STORAGE_OPTIONS: { id: StorageLocation; label: string; emoji: string }[] =
 ];
 
 export function BarcodeScannerClient() {
-  const router = useRouter();
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const detectorRef = useRef<any>(null);
   const rafRef = useRef<number | null>(null);
   const scannedRef = useRef(false);
+  const mountedRef = useRef(true);
 
   const [phase, setPhase] = useState<Phase>("scanning");
   const [product, setProduct] = useState<ProductData | null>(null);
@@ -56,43 +81,53 @@ export function BarcodeScannerClient() {
   const [hasTorch, setHasTorch] = useState(false);
   const [cameraError, setCameraError] = useState(false);
   const [lastAdded, setLastAdded] = useState("");
-  // stream stored in state so attaching to video happens reactively after DOM commit
-  const [activeStream, setActiveStream] = useState<MediaStream | null>(null);
 
-  // ─── Attach stream to video reactively once both are available ────────────
+  // ─── Stop camera helper ──────────────────────────────────────────────────
 
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!activeStream || !video) return;
+  const stopCamera = useCallback(() => {
+    if (rafRef.current) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+  }, []);
 
-    video.srcObject = activeStream;
-    // play() after metadata is loaded to avoid black frame
-    const handleMetadata = () => {
-      video.play().catch(() => {
-        // play() rejected (e.g. tab hidden) — not fatal
-      });
+  // ─── Scan loop — waits for video to be ready ────────────────────────────
+
+  const startScanLoop = useCallback(() => {
+    if (!detectorRef.current) return;
+
+    const detect = async () => {
+      if (scannedRef.current || !mountedRef.current) return;
+
+      const video = videoRef.current;
+      // Only attempt detection when the video is actively playing
+      if (video && video.readyState >= 2 && video.videoWidth > 0) {
+        try {
+          const barcodes = await detectorRef.current.detect(video);
+          if (barcodes.length > 0 && !scannedRef.current) {
+            scannedRef.current = true;
+            stopCamera();
+            await lookupBarcode(barcodes[0].rawValue);
+            return;
+          }
+        } catch {
+          // detect() can fail intermittently — keep scanning
+        }
+      }
+
+      rafRef.current = requestAnimationFrame(detect);
     };
-    video.addEventListener("loadedmetadata", handleMetadata);
-    // If metadata already loaded (unlikely but safe)
-    if (video.readyState >= 1) handleMetadata();
 
-    return () => {
-      video.removeEventListener("loadedmetadata", handleMetadata);
-    };
-  }, [activeStream]);
+    rafRef.current = requestAnimationFrame(detect);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stopCamera]);
 
   // ─── Camera setup ─────────────────────────────────────────────────────────
 
-  const stopCamera = useCallback(() => {
-    if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    streamRef.current?.getTracks().forEach((t) => t.stop());
-    streamRef.current = null;
-    setActiveStream(null);
-  }, []);
-
   const startCamera = useCallback(async () => {
     try {
-      // Try rear camera first, fall back to any camera if constraint fails
       let stream: MediaStream;
       try {
         stream = await navigator.mediaDevices.getUserMedia({
@@ -102,9 +137,24 @@ export function BarcodeScannerClient() {
         // facingMode failed (common on desktop) — try without constraint
         stream = await navigator.mediaDevices.getUserMedia({ video: true });
       }
+
+      if (!mountedRef.current) {
+        stream.getTracks().forEach((t) => t.stop());
+        return;
+      }
+
       streamRef.current = stream;
-      // Trigger the reactive attachment effect
-      setActiveStream(stream);
+
+      // Attach stream to video element directly (no separate effect needed)
+      const video = videoRef.current;
+      if (video) {
+        video.srcObject = stream;
+        try {
+          await video.play();
+        } catch {
+          // play() can fail if tab is hidden — not fatal
+        }
+      }
 
       // Check for torch
       const track = stream.getVideoTracks()[0];
@@ -119,44 +169,26 @@ export function BarcodeScannerClient() {
         detectorRef.current = new BD({
           formats: ["ean_13", "ean_8", "upc_a", "upc_e", "code_128", "code_39", "qr_code"],
         });
-        scanLoop();
+        startScanLoop();
       } else {
-        // BarcodeDetector not supported — go straight to manual entry
-        setPhase("not_found");
+        // BarcodeDetector not available in this browser
+        setPhase("no_detector");
       }
     } catch {
       setCameraError(true);
     }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [startScanLoop]);
+
+  // ─── Mount / unmount ──────────────────────────────────────────────────────
 
   useEffect(() => {
+    mountedRef.current = true;
     startCamera();
-    return () => stopCamera();
-  }, [startCamera, stopCamera]);
-
-  // ─── Scan loop ────────────────────────────────────────────────────────────
-
-  const scanLoop = useCallback(() => {
-    if (!videoRef.current || !detectorRef.current || scannedRef.current) return;
-
-    const detect = async () => {
-      if (scannedRef.current) return;
-      try {
-        const barcodes = await detectorRef.current!.detect(videoRef.current!);
-        if (barcodes.length > 0) {
-          scannedRef.current = true;
-          stopCamera();
-          await lookupBarcode(barcodes[0].rawValue);
-          return;
-        }
-      } catch {
-        // continue scanning
-      }
-      rafRef.current = requestAnimationFrame(detect);
+    return () => {
+      mountedRef.current = false;
+      stopCamera();
     };
-
-    rafRef.current = requestAnimationFrame(detect);
-  }, [stopCamera]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [startCamera, stopCamera]);
 
   // ─── Barcode lookup ───────────────────────────────────────────────────────
 
@@ -289,6 +321,36 @@ export function BarcodeScannerClient() {
             <KeyboardIcon className="w-4 h-4" />
             Type it in instead
           </Link>
+        </div>
+      </div>
+    );
+  }
+
+  // BarcodeDetector not supported in this browser
+  if (phase === "no_detector") {
+    return (
+      <div className="min-h-screen bg-cubby-stone">
+        <PageHeader title="Scan barcode" backHref="/log" />
+        <div className="px-4 pt-12 text-center space-y-4">
+          <p className="text-4xl">📱</p>
+          <p className="font-black text-cubby-charcoal text-lg">Barcode scanning not supported</p>
+          <p className="text-cubby-taupe text-sm">
+            Your browser doesn&apos;t support barcode scanning yet. Try using Chrome on Android, or add the item manually.
+          </p>
+          <div className="space-y-3 pt-2">
+            <Link
+              href="/log/type"
+              className="flex items-center justify-center gap-2 w-full bg-cubby-green text-white py-3.5 rounded-2xl font-black text-sm active:scale-[0.97] transition-transform"
+            >
+              <KeyboardIcon className="w-4 h-4" /> Type it in
+            </Link>
+            <Link
+              href="/log/receipt"
+              className="flex items-center justify-center gap-2 w-full bg-cubby-cream text-cubby-charcoal py-3.5 rounded-2xl font-black text-sm active:scale-[0.97] transition-transform"
+            >
+              📸 Scan receipt instead
+            </Link>
+          </div>
         </div>
       </div>
     );
@@ -512,3 +574,4 @@ export function BarcodeScannerClient() {
     </div>
   );
 }
+```
