@@ -1,19 +1,18 @@
 /**
- * Home Screen — Inventory-first Dashboard
+ * Home Screen — Lightweight Dashboard
  *
- * Per the V1→V2 gap spec, Home tab = inventory view.
- * The full inventory system (storage tabs, urgency groups, expiry bars,
- * swipe actions) is the primary content, with dashboard widgets below.
+ * Shows key alerts, expiry banners, quick-action widgets, and challenges.
+ * Full inventory browsing lives under the Recipes tab ("My Pantry" sub-tab).
  */
 import { auth } from "@/auth";
 import { HomeHeader } from "@/components/home/HomeHeader";
 import { ExpiryBanners } from "@/components/home/ExpiryBanners";
-import { InventoryHome } from "@/components/home/InventoryHome";
 import { MoneySavedTracker } from "@/components/home/MoneySavedTracker";
 import { EatMeSoonCarousel } from "@/components/home/EatMeSoonCarousel";
 import { RecipeIdeasFan } from "@/components/home/RecipeIdeasFan";
 import { DataInsightNudge } from "@/components/home/DataInsightNudge";
 import { ChallengesSection } from "@/components/home/ChallengesSection";
+import { QuickStats } from "@/components/home/QuickStats";
 
 export default async function HomePage() {
   const session = await auth().catch(() => null);
@@ -24,7 +23,7 @@ export default async function HomePage() {
       {/* Header */}
       <HomeHeader userName={userName} />
 
-      <div className="px-4 pt-4 space-y-5">
+      <div className="px-4 pt-4 space-y-5 pb-28">
         {/* Greeting */}
         <div>
           <h1 className="text-page-title text-cubby-charcoal">
@@ -35,13 +34,11 @@ export default async function HomePage() {
           </p>
         </div>
 
+        {/* Quick inventory stats row */}
+        <QuickStats />
+
         {/* Expiry alert banners with recipe CTAs */}
         <ExpiryBanners />
-
-        {/* ─── Inventory System (primary content) ─── */}
-        <InventoryHome />
-
-        {/* ─── Dashboard widgets below inventory ─── */}
 
         {/* Eat Me Soon carousel */}
         <EatMeSoonCarousel />

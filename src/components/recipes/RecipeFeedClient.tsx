@@ -355,9 +355,8 @@ export function RecipeFeedClient() {
 
   return (
     <div className="pb-24">
-      {/* Header */}
-      <div className="sticky top-0 z-10 bg-cubby-stone px-4 pt-4 pb-3 flex items-center justify-between gap-3">
-        <h1 className="font-black text-cubby-charcoal text-xl flex-1">Recipe Ideas 👩‍🍳</h1>
+      {/* Filter / refresh controls */}
+      <div className="bg-cubby-stone px-4 pt-2 pb-3 flex items-center justify-end gap-2">
         <div className="flex items-center gap-2">
           <button
             onClick={() => setShowFilters(true)}

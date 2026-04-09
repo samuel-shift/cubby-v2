@@ -123,6 +123,8 @@ export function ShoppingClient() {
   const [showAddForm, setShowAddForm] = useState(false);
   const [addingRecipeId, setAddingRecipeId] = useState<string | null>(null);
   const [addedRecipeId, setAddedRecipeId] = useState<string | null>(null);
+  const [suggestions, setSuggestions] = useState<{ name: string; reason: string; emoji: string }[]>([]);
+  const [addingSuggestion, setAddingSuggestion] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   // ─── Load data ───────────────────────────────────────────────────────────
@@ -151,10 +153,22 @@ export function ShoppingClient() {
     }
   }, []);
 
+  const loadSuggestions = useCallback(async () => {
+    try {
+      const res = await fetch("/api/shopping/suggestions");
+      if (!res.ok) return;
+      const data = await res.json();
+      setSuggestions(Array.isArray(data) ? data : []);
+    } catch {
+      // silent
+    }
+  }, []);
+
   useEffect(() => {
     loadList();
     loadRecipes();
-  }, [loadList, loadRecipes]);
+    loadSuggestions();
+  }, [loadList, loadRecipes, loadSuggestions]);
 
   useEffect(() => {
     if (showAddForm) setTimeout(() => inputRef.current?.focus(), 100);
@@ -262,6 +276,35 @@ export function ShoppingClient() {
     );
   }
 
+  async function handleAddSuggestion(suggestion: { name: string; reason: string; emoji: string }) {
+    setAddingSuggestion(suggestion.name);
+    try {
+      const category = detectCategory(suggestion.name);
+      const aisleOrder = detectAisleOrder(suggestion.name);
+      const res = await fetch("/api/shopping", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: suggestion.name,
+          quantity: 1,
+          category: category !== "Other" ? category : undefined,
+          aisleOrder,
+        }),
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      setList((prev) =>
+        prev ? { ...prev, items: [...prev.items, data.item] } : prev
+      );
+      // Remove from suggestions list
+      setSuggestions((prev) => prev.filter((s) => s.name !== suggestion.name));
+    } catch {
+      // silent
+    } finally {
+      setAddingSuggestion(null);
+    }
+  }
+
   async function handleAddRecipeToList(recipe: Recipe) {
     setAddingRecipeId(recipe.id);
     try {
@@ -358,58 +401,88 @@ export function ShoppingClient() {
             <div className="pt-16 text-center">
               <div className="w-8 h-8 border-4 border-cubby-green border-t-transparent rounded-full animate-spin mx-auto" />
             </div>
-          ) : totalItems === 0 && !showAddForm ? (
-            /* Empty state */
-            <div className="pt-12 text-center space-y-4">
-              <p className="text-5xl">🛒</p>
-              <p className="font-black text-cubby-charcoal text-lg">Your list is empty</p>
-              <p className="text-cubby-taupe text-sm">Add items manually or pull from a recipe in the Cookbook tab.</p>
-              <button
-                onClick={() => setShowAddForm(true)}
-                className="bg-cubby-green text-white px-6 py-3.5 rounded-2xl font-black text-sm flex items-center gap-2 mx-auto active:scale-95 transition-transform"
-              >
-                <Plus className="w-4 h-4" /> Add first item
-              </button>
-            </div>
           ) : (
             <>
-              {/* Aisle-grouped unchecked items */}
-              {[...aisleGroups.entries()].map(([aisleNum, items]) => (
-                <div key={aisleNum} className="space-y-1">
+              {/* Smart suggestions from inventory intelligence */}
+              {suggestions.length > 0 && (
+                <div className="space-y-2">
                   <p className="text-xs font-black text-cubby-taupe uppercase tracking-wider px-1">
-                    {AISLE_LABELS[aisleNum] ?? "Other"}
+                    💡 Suggested
                   </p>
-                  <div className="bg-cubby-cream rounded-card divide-y divide-cubby-stone overflow-hidden">
-                    {items.map((item) => (
-                      <ShoppingItemRow
-                        key={item.id}
-                        item={item}
-                        onToggle={() => handleToggleCheck(item)}
-                        onDelete={() => handleDeleteItem(item.id)}
-                      />
+                  <div className="flex gap-2 overflow-x-auto pb-1 -mx-4 px-4 scrollbar-none">
+                    {suggestions.slice(0, 8).map((s) => (
+                      <button
+                        key={s.name}
+                        onClick={() => handleAddSuggestion(s)}
+                        disabled={addingSuggestion === s.name}
+                        className={cn(
+                          "flex-shrink-0 flex items-center gap-1.5 bg-cubby-cream border border-black/5 rounded-full px-3 py-2 text-xs font-black text-cubby-charcoal active:scale-95 transition-all",
+                          addingSuggestion === s.name && "opacity-50"
+                        )}
+                      >
+                        <span>{s.emoji}</span>
+                        <span>{s.name}</span>
+                        <Plus className="w-3 h-3 text-cubby-green" />
+                      </button>
                     ))}
                   </div>
                 </div>
-              ))}
+              )}
 
-              {/* Checked items */}
-              {checkedItems.length > 0 && (
-                <div className="space-y-1">
-                  <p className="text-xs font-black text-cubby-taupe uppercase tracking-wider px-1">
-                    ✓ Done ({checkedItems.length})
-                  </p>
-                  <div className="bg-cubby-cream/60 rounded-card divide-y divide-cubby-stone/50 overflow-hidden">
-                    {checkedItems.map((item) => (
-                      <ShoppingItemRow
-                        key={item.id}
-                        item={item}
-                        onToggle={() => handleToggleCheck(item)}
-                        onDelete={() => handleDeleteItem(item.id)}
-                        dimmed
-                      />
-                    ))}
-                  </div>
+              {totalItems === 0 && !showAddForm ? (
+                /* Empty state */
+                <div className="pt-12 text-center space-y-4">
+                  <p className="text-5xl">🛒</p>
+                  <p className="font-black text-cubby-charcoal text-lg">Your list is empty</p>
+                  <p className="text-cubby-taupe text-sm">Add items manually or pull from a recipe in the Cookbook tab.</p>
+                  <button
+                    onClick={() => setShowAddForm(true)}
+                    className="bg-cubby-green text-white px-6 py-3.5 rounded-2xl font-black text-sm flex items-center gap-2 mx-auto active:scale-95 transition-transform"
+                  >
+                    <Plus className="w-4 h-4" /> Add first item
+                  </button>
                 </div>
+              ) : (
+                <>
+                  {/* Aisle-grouped unchecked items */}
+                  {[...aisleGroups.entries()].map(([aisleNum, items]) => (
+                    <div key={aisleNum} className="space-y-1">
+                      <p className="text-xs font-black text-cubby-taupe uppercase tracking-wider px-1">
+                        {AISLE_LABELS[aisleNum] ?? "Other"}
+                      </p>
+                      <div className="bg-cubby-cream rounded-card divide-y divide-cubby-stone overflow-hidden">
+                        {items.map((item) => (
+                          <ShoppingItemRow
+                            key={item.id}
+                            item={item}
+                            onToggle={() => handleToggleCheck(item)}
+                            onDelete={() => handleDeleteItem(item.id)}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+
+                  {/* Checked items */}
+                  {checkedItems.length > 0 && (
+                    <div className="space-y-1">
+                      <p className="text-xs font-black text-cubby-taupe uppercase tracking-wider px-1">
+                        ✓ Done ({checkedItems.length})
+                      </p>
+                      <div className="bg-cubby-cream/60 rounded-card divide-y divide-cubby-stone/50 overflow-hidden">
+                        {checkedItems.map((item) => (
+                          <ShoppingItemRow
+                            key={item.id}
+                            item={item}
+                            onToggle={() => handleToggleCheck(item)}
+                            onDelete={() => handleDeleteItem(item.id)}
+                            dimmed
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
               )}
             </>
           )}
