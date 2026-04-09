@@ -1,15 +1,21 @@
-import { SignJWT, jwtVerify } from "jose";
+import { createHmac, randomBytes, timingSafeEqual } from "crypto";
 import { cookies } from "next/headers";
 
-const SECRET = new TextEncoder().encode(process.env.AUTH_SECRET ?? "fallback-secret");
+const SECRET = process.env.AUTH_SECRET ?? "fallback-secret";
 const COOKIE = "cubby-session";
 
-export async function createSession(userId: string, email: string) {
-  const token = await new SignJWT({ userId, email })
-    .setProtectedHeader({ alg: "HS256" })
-    .setExpirationTime("30d")
-    .sign(SECRET);
-  return token;
+function sign(payload: string): string {
+  const hmac = createHmac("sha256", SECRET);
+  hmac.update(payload);
+  return hmac.digest("hex");
+}
+
+export async function createSession(userId: string, email: string): Promise<string> {
+  const expires = Date.now() + 30 * 24 * 60 * 60 * 1000;
+  const payload = JSON.stringify({ userId, email, expires });
+  const b64 = Buffer.from(payload).toString("base64url");
+  const sig = sign(b64);
+  return `${b64}.${sig}`;
 }
 
 export async function getSession(): Promise<{ userId: string; email: string } | null> {
@@ -17,8 +23,13 @@ export async function getSession(): Promise<{ userId: string; email: string } | 
   const token = cookieStore.get(COOKIE)?.value;
   if (!token) return null;
   try {
-    const { payload } = await jwtVerify(token, SECRET);
-    return { userId: payload.userId as string, email: payload.email as string };
+    const [b64, sig] = token.split(".");
+    if (!b64 || !sig) return null;
+    const expected = sign(b64);
+    if (!timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null;
+    const payload = JSON.parse(Buffer.from(b64, "base64url").toString());
+    if (Date.now() > payload.expires) return null;
+    return { userId: payload.userId, email: payload.email };
   } catch {
     return null;
   }
