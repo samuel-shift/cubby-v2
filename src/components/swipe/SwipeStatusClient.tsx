@@ -4,38 +4,88 @@
  * Swipe Status Screen
  *
  * Directions: Left = BINNED, Right = EATEN, Up = STILL HERE
- * Drag physics, stamps, progress bar, undo, confetti on completion
+ * Drag physics, stamps, progress bar, undo, confetti on completion.
+ * Fetches real inventory from /api/inventory and PATCHes status on each swipe.
  */
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion, useMotionValue, useTransform, AnimatePresence } from "framer-motion";
 import { RotateCcw } from "lucide-react";
 import { cn, getCategoryEmoji } from "@/lib/utils";
 
-// TODO: fetch from API
-const MOCK_ITEMS = [
-  { id: "1", name: "Spinach", category: "produce", daysLeft: 1 },
-  { id: "2", name: "Whole milk", category: "dairy", daysLeft: 2 },
-  { id: "3", name: "Chicken breast", category: "meat", daysLeft: 1 },
-  { id: "4", name: "Cheddar", category: "dairy", daysLeft: 4 },
-  { id: "5", name: "Sourdough", category: "bread", daysLeft: 2 },
-];
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface InventoryItem {
+  id: string;
+  name: string;
+  category: string;
+  expiryDate: string | null;
+  status: string;
+}
+
+interface SwipeItem {
+  id: string;
+  name: string;
+  category: string;
+  daysLeft: number | null;
+}
 
 type SwipeAction = "eaten" | "binned" | "still_here" | null;
 
-function getStamp(action: SwipeAction) {
-  if (action === "eaten") return { label: "EATEN ✓", color: "text-cubby-lime" };
-  if (action === "binned") return { label: "BINNED 🗑️", color: "text-cubby-urgent" };
-  if (action === "still_here") return { label: "STILL HERE 👍", color: "text-blue-400" };
-  return null;
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function daysUntil(dateStr: string | null): number | null {
+  if (!dateStr) return null;
+  const diff = Math.ceil(
+    (new Date(dateStr).getTime() - Date.now()) / (1000 * 60 * 60 * 24)
+  );
+  return diff;
 }
+
+function expiryLabel(days: number | null): string {
+  if (days === null) return "No expiry set";
+  if (days < 0) return "Expired";
+  if (days === 0) return "Expires today";
+  if (days === 1) return "Expires tomorrow";
+  return `${days} days left`;
+}
+
+function expiryColor(days: number | null): string {
+  if (days === null) return "text-cubby-taupe";
+  if (days <= 1) return "text-cubby-urgent";
+  if (days <= 3) return "text-amber-500";
+  return "text-cubby-taupe";
+}
+
+async function patchInventoryStatus(
+  id: string,
+  action: SwipeAction
+): Promise<void> {
+  const statusMap: Record<NonNullable<SwipeAction>, string> = {
+    eaten: "EATEN",
+    binned: "THROWN_OUT",
+    still_here: "STILL_HERE",
+  };
+  if (!action) return;
+  try {
+    await fetch(`/api/inventory/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: statusMap[action] }),
+    });
+  } catch {
+    // Best-effort — swipe UI already committed locally
+  }
+}
+
+// ─── SwipeCard ────────────────────────────────────────────────────────────────
 
 function SwipeCard({
   item,
   onAction,
   stackIndex,
 }: {
-  item: typeof MOCK_ITEMS[0];
+  item: SwipeItem;
   onAction: (id: string, action: SwipeAction) => void;
   stackIndex: number;
 }) {
@@ -44,7 +94,6 @@ function SwipeCard({
   const rotate = useTransform(x, [-150, 150], [-20, 20]);
   const opacity = useTransform(x, [-200, -100, 0, 100, 200], [0, 1, 1, 1, 0]);
 
-  // Stamp opacity
   const eatenOpacity = useTransform(x, [0, 80], [0, 1]);
   const binnedOpacity = useTransform(x, [-80, 0], [1, 0]);
   const stillHereOpacity = useTransform(y, [-80, 0], [1, 0]);
@@ -97,8 +146,8 @@ function SwipeCard({
         <span className="text-6xl">{getCategoryEmoji(item.category)}</span>
         <div className="text-center">
           <p className="font-black text-cubby-charcoal text-xl">{item.name}</p>
-          <p className={cn("text-sm font-semibold mt-1", item.daysLeft <= 1 ? "text-cubby-urgent" : "text-cubby-taupe")}>
-            {item.daysLeft === 0 ? "Expired!" : item.daysLeft === 1 ? "Expires tomorrow" : `${item.daysLeft} days left`}
+          <p className={cn("text-sm font-semibold mt-1", expiryColor(item.daysLeft))}>
+            {expiryLabel(item.daysLeft)}
           </p>
         </div>
 
@@ -114,18 +163,59 @@ function SwipeCard({
   );
 }
 
-export function SwipeStatusClient() {
-  const [items, setItems] = useState(MOCK_ITEMS);
-  const [history, setHistory] = useState<Array<{ item: typeof MOCK_ITEMS[0]; action: SwipeAction }>>([]);
-  const [done, setDone] = useState(false);
+// ─── Main ─────────────────────────────────────────────────────────────────────
 
-  const total = MOCK_ITEMS.length;
+export function SwipeStatusClient() {
+  const [allItems, setAllItems] = useState<SwipeItem[]>([]);
+  const [items, setItems] = useState<SwipeItem[]>([]);
+  const [history, setHistory] = useState<Array<{ item: SwipeItem; action: SwipeAction }>>([]);
+  const [done, setDone] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  // Fetch real inventory on mount — prioritise expiring/unresolved items
+  useEffect(() => {
+    async function load() {
+      try {
+        const res = await fetch("/api/inventory");
+        if (!res.ok) throw new Error("Failed to fetch");
+        const { items: raw }: { items: InventoryItem[] } = await res.json();
+
+        const swipeItems: SwipeItem[] = raw.map((item) => ({
+          id: item.id,
+          name: item.name,
+          category: item.category,
+          daysLeft: daysUntil(item.expiryDate),
+        }));
+
+        // Sort: expired first, then by days left ascending, then no-date items
+        swipeItems.sort((a, b) => {
+          if (a.daysLeft === null && b.daysLeft === null) return 0;
+          if (a.daysLeft === null) return 1;
+          if (b.daysLeft === null) return -1;
+          return a.daysLeft - b.daysLeft;
+        });
+
+        setAllItems(swipeItems);
+        setItems(swipeItems);
+      } catch {
+        // Fall back to empty — show a message
+      } finally {
+        setLoading(false);
+      }
+    }
+    load();
+  }, []);
+
+  const total = allItems.length;
   const processed = total - items.length;
-  const progress = (processed / total) * 100;
+  const progress = total === 0 ? 0 : (processed / total) * 100;
 
   const handleAction = (id: string, action: SwipeAction) => {
     const item = items.find((i) => i.id === id);
     if (!item) return;
+
+    // Persist to API
+    patchInventoryStatus(id, action);
 
     setHistory((h) => [...h, { item, action }]);
     setItems((prev) => {
@@ -133,30 +223,99 @@ export function SwipeStatusClient() {
       if (next.length === 0) setTimeout(() => setDone(true), 300);
       return next;
     });
-
-    // TODO: PATCH /api/inventory/[id] with status
   };
 
   const handleUndo = () => {
     const last = history[history.length - 1];
     if (!last) return;
+
+    // Revert status back to ACTIVE
+    fetch(`/api/inventory/${last.item.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "ACTIVE" }),
+    }).catch(() => {});
+
     setItems((prev) => [last.item, ...prev]);
     setHistory((h) => h.slice(0, -1));
     setDone(false);
   };
 
-  if (done) {
+  // ─── Loading ────────────────────────────────────────────────────────────────
+
+  if (loading) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-cubby-stone px-6 text-center space-y-4">
+      <div className="min-h-screen bg-cubby-stone flex items-center justify-center">
+        <div className="text-center space-y-3">
+          <div className="text-4xl animate-pulse">🍽️</div>
+          <p className="text-cubby-taupe font-semibold text-sm">Loading your kitchen…</p>
+        </div>
+      </div>
+    );
+  }
+
+  // ─── Empty ──────────────────────────────────────────────────────────────────
+
+  if (!loading && total === 0) {
+    return (
+      <div className="min-h-screen bg-cubby-stone flex flex-col items-center justify-center px-6 text-center space-y-4">
+        <div className="text-6xl">🧊</div>
+        <h1 className="font-black text-cubby-charcoal text-xl">Your kitchen is empty</h1>
+        <p className="text-cubby-taupe text-sm">Add some items first, then come back to do a quick status check.</p>
+        <button onClick={() => window.location.href = "/log"} className="btn-primary mt-2">
+          Add items
+        </button>
+      </div>
+    );
+  }
+
+  // ─── Done ───────────────────────────────────────────────────────────────────
+
+  if (done) {
+    const eaten = history.filter((h) => h.action === "eaten").length;
+    const binned = history.filter((h) => h.action === "binned").length;
+    const stillHere = history.filter((h) => h.action === "still_here").length;
+
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-cubby-stone px-6 text-center space-y-5">
         <div className="text-7xl animate-spring-pop">🎉</div>
         <h1 className="text-page-title text-cubby-charcoal">You&apos;re all caught up!</h1>
-        <p className="text-cubby-taupe">Great kitchen check-in. Keep it up!</p>
-        <button onClick={() => window.location.href = "/"} className="btn-primary mt-4">
+
+        <div className="cubby-card w-full max-w-xs space-y-3 text-left">
+          {eaten > 0 && (
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-semibold text-cubby-charcoal">✅ Eaten</span>
+              <span className="font-black text-cubby-charcoal">{eaten} item{eaten !== 1 ? "s" : ""}</span>
+            </div>
+          )}
+          {binned > 0 && (
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-semibold text-cubby-charcoal">🗑️ Binned</span>
+              <span className="font-black text-cubby-charcoal">{binned} item{binned !== 1 ? "s" : ""}</span>
+            </div>
+          )}
+          {stillHere > 0 && (
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-semibold text-cubby-charcoal">📦 Still in your kitchen</span>
+              <span className="font-black text-cubby-charcoal">{stillHere} item{stillHere !== 1 ? "s" : ""}</span>
+            </div>
+          )}
+        </div>
+
+        {eaten > 0 && (
+          <p className="text-cubby-taupe text-sm">
+            Great kitchen check-in. Keep it up!
+          </p>
+        )}
+
+        <button onClick={() => window.location.href = "/"} className="btn-primary mt-2">
           Back to home
         </button>
       </div>
     );
   }
+
+  // ─── Main swipe UI ──────────────────────────────────────────────────────────
 
   return (
     <div className="min-h-screen bg-cubby-stone flex flex-col">
@@ -184,7 +343,7 @@ export function SwipeStatusClient() {
           />
         </div>
         <p className="text-xs text-cubby-taupe font-semibold mt-1.5">
-          {processed} of {total} items sorted
+          {processed} of {total} item{total !== 1 ? "s" : ""} sorted
         </p>
       </div>
 
@@ -201,6 +360,31 @@ export function SwipeStatusClient() {
               />
             ))}
           </AnimatePresence>
+        </div>
+      </div>
+
+      {/* Accessibility fallback buttons */}
+      <div className="px-6 pb-10 space-y-3">
+        <p className="text-xs text-cubby-taupe text-center font-semibold mb-4">Or tap to choose:</p>
+        <div className="flex gap-3">
+          <button
+            onClick={() => items[0] && handleAction(items[0].id, "binned")}
+            className="flex-1 py-3 rounded-2xl bg-cubby-salmon/20 text-cubby-urgent font-black text-sm active:scale-95 transition-transform"
+          >
+            🗑️ Binned
+          </button>
+          <button
+            onClick={() => items[0] && handleAction(items[0].id, "still_here")}
+            className="flex-1 py-3 rounded-2xl bg-blue-50 text-blue-600 font-black text-sm active:scale-95 transition-transform"
+          >
+            📦 Still here
+          </button>
+          <button
+            onClick={() => items[0] && handleAction(items[0].id, "eaten")}
+            className="flex-1 py-3 rounded-2xl bg-cubby-lime/30 text-cubby-green font-black text-sm active:scale-95 transition-transform"
+          >
+            ✅ Eaten
+          </button>
         </div>
       </div>
     </div>
