@@ -7,7 +7,7 @@
  */
 
 import Link from "next/link";
-import { Camera, Receipt, KeyboardIcon, ChefHat, Trash2, Mic, Mail, ScanLine } from "lucide-react";
+import { Camera, Receipt, KeyboardIcon, Mic, Mail, ScanLine } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PageHeader } from "@/components/ui/PageHeader";
 
@@ -47,18 +47,6 @@ const LOG_OPTIONS = [
         href: "#",
         comingSoon: true,
       },
-    ],
-  },
-  {
-    id: "waste",
-    label: "I threw food away",
-    emoji: "🗑️",
-    description: "Log what you wasted",
-    color: "bg-cubby-urgent/10",
-    textColor: "text-cubby-urgent",
-    subOptions: [
-      { label: "Photo of bin", icon: Trash2, href: "/log/waste" },
-      { label: "Type it in", icon: KeyboardIcon, href: "/log/waste" },
     ],
   },
 ];
