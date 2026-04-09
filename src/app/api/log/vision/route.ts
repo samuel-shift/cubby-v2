@@ -36,26 +36,31 @@ Return ONLY valid JSON, no explanation: {items: [{name, quantity, unit, category
 // Use faster haiku model for snapshot (speed > accuracy for inventory scan)
 // Use opus for receipt (accuracy critical for line-item parsing)
 const MODEL_MAP: Record<string, string> = {
-  receipt:  "claude-opus-4-5",
-  snapshot: "claude-haiku-4-5-20251001",
-  meal:     "claude-haiku-4-5-20251001",
-  waste:    "claude-haiku-4-5-20251001",
+  receipt:  "claude-3-5-sonnet-latest",
+  snapshot: "claude-3-5-haiku-latest",
+  meal:     "claude-3-5-haiku-latest",
+  waste:    "claude-3-5-haiku-latest",
 };
 
 export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
 
-  const { imageBase64, imageUrl, entryType } = await req.json();
+  const { imageBase64, entryType } = await req.json();
 
   if (!entryType || !SYSTEM_PROMPTS[entryType]) {
     return NextResponse.json({ error: "Invalid entryType" }, { status: 400 });
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const imageSource: any = imageBase64
-    ? { type: "base64", media_type: "image/jpeg", data: imageBase64 }
-    : { type: "url", url: imageUrl };
+  if (!imageBase64) {
+    return NextResponse.json({ error: "imageBase64 is required" }, { status: 400 });
+  }
+
+  const imageSource = {
+    type: "base64" as const,
+    media_type: "image/jpeg" as const,
+    data: imageBase64,
+  };
 
   const model = MODEL_MAP[entryType] ?? "claude-haiku-4-5-20251001";
 
@@ -63,14 +68,13 @@ export async function POST(req: NextRequest) {
     model,
     max_tokens: 1024,
     system: SYSTEM_PROMPTS[entryType],
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     messages: [
       {
         role: "user",
         content: [
           { type: "image", source: imageSource },
           { type: "text", text: "Please extract all food items from this image as instructed." },
-        ] as any,
+        ],
       },
     ],
   });
