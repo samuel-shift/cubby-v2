@@ -7,6 +7,11 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 
+async function getUserId(): Promise<string | null> {
+  const session = await auth().catch(() => null);
+  return session?.user?.id ?? null;
+}
+
 const AddItemSchema = z.object({
   name: z.string().min(1),
   quantity: z.number().default(1),
@@ -36,28 +41,25 @@ async function getOrCreateList(userId: string) {
 }
 
 export async function GET() {
-  const session = await auth();
-  if (!session?.user?.id) return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
+  const userId = await getUserId();
+  if (!userId) return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
 
-  const list = await getOrCreateList(session.user.id);
+  const list = await getOrCreateList(userId);
   return NextResponse.json({ list });
 }
 
 export async function POST(req: NextRequest) {
-  const session = await auth();
-  if (!session?.user?.id) return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
+  const userId = await getUserId();
+  if (!userId) return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
 
   const body = await req.json();
   const parsed = AddItemSchema.safeParse(body);
   if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
 
-  const list = await getOrCreateList(session.user.id);
+  const list = await getOrCreateList(userId);
 
   const item = await prisma.shoppingItem.create({
-    data: {
-      ...parsed.data,
-      shoppingListId: list.id,
-    },
+    data: { ...parsed.data, shoppingListId: list.id },
   });
 
   return NextResponse.json({ item }, { status: 201 });
