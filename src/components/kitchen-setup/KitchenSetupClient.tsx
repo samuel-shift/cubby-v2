@@ -52,6 +52,7 @@ export function KitchenSetupClient() {
             body: JSON.stringify({
               name: item.name,
               category: item.category,
+              categoryEmoji: item.emoji,
               location: item.location,
               quantity: 1,
               entryMethod: "MANUAL",
