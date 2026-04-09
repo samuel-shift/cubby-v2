@@ -1,19 +1,11 @@
-—🏆"use client";
+"use client";
 
 /**
  * Challenges Section
- *
- * V1 challenges (build these):
- * - Swipe Status (already built, link through)
- * - Leftover Legend (use leftovers 3x in a week)
- * - Empty Bin Week (zero waste for 7 days)
- *
- * V2 / Coming Soon (render greyed out):
- * - Friend's Fridge (social — requires multi-user, defer to V2)
  */
 
 import Link from "next/link";
-import { Smartphone, Award, Trash2, Users } from "lucide-react";
+import { Smartphone, Award, Trash2, Users, UtensilsCrossed } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface Challenge {
@@ -22,13 +14,22 @@ interface Challenge {
   description: string;
   icon: React.ElementType;
   href: string;
-  progress?: number; // 0-100
+  progress?: number;
   comingSoon?: boolean;
   color: string;
   bgColor: string;
 }
 
 const CHALLENGES: Challenge[] = [
+  {
+    id: "kitchen-setup",
+    title: "Complete Your Kitchen",
+    description: "Stock up with common items in 60 seconds",
+    icon: UtensilsCrossed,
+    href: "/kitchen-setup",
+    color: "text-cubby-green",
+    bgColor: "bg-cubby-green/15",
+  },
   {
     id: "swipe-status",
     title: "Swipe Status",
