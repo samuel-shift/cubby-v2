@@ -1,26 +1,3 @@
-Let me look at the barcode scanner component to diagnose the issue.I can see the issue. The problem is different from the vision API bug — it's a camera lifecycle issue. When `startCamera` is called on mount, `scanLoop` is called inside it, but `scanLoop` is defined as a `useCallback` that depends on `stopCamera`. The `startCamera` callback is also a `useCallback` with an empty dependency array, meaning `scanLoop` inside it captures a stale closure.
-
-But the bigger issue is: when the `BarcodeDetector` API isn't supported (which is the case on iOS Safari and many desktop browsers), it immediately sets `phase` to `"not_found"` — which hides the camera view but doesn't actually explain what happened. And on browsers where `BarcodeDetector` IS available, the `detect()` call can throw if the video element isn't ready yet, which could cause the scan loop to silently die.
-
-Let me also check if there's a race condition with the `useEffect` cleanup:
-
-The root cause: `startCamera` calls `scanLoop()` directly, but at that point `videoRef.current` may not have its stream attached yet (the stream attachment happens via a separate `useEffect` that reacts to `activeStream`). So the scan loop starts, finds no video, and exits. Meanwhile the component may re-render and the camera gets cleaned up.
-
-Let me fix this properly:Clean. Here's what was wrong and what I fixed:
-
-**Three bugs causing the "opens then immediately closes" behaviour:**
-
-1. **Race condition with video stream attachment.** The old code used a separate `useEffect` to attach the stream to the `<video>` element (reacting to an `activeStream` state), but then called `scanLoop()` immediately inside `startCamera()` — before the stream was actually attached. The scan loop would find `videoRef.current` with no active video, fail to detect, and the component would either hang or error out. **Fix:** I now attach the stream directly to the video element inside `startCamera()` and `await video.play()` before starting the scan loop.
-
-2. **Scan loop crashing on unready video.** `BarcodeDetector.detect()` throws if the video element isn't in a playable state. The old code had no readiness check. **Fix:** the scan loop now checks `video.readyState >= 2 && video.videoWidth > 0` before calling `detect()`, and keeps looping until the video is ready.
-
-3. **Stale closure / unmount leak.** The old `startCamera` had an empty dependency array but referenced `scanLoop` which depended on `stopCamera`. This caused stale closures. Also, if the component unmounted mid-camera-setup, the stream would leak. **Fix:** added a `mountedRef` to guard against post-unmount state updates, and restructured the callbacks so dependencies are correct.
-
-4. **BarcodeDetector unsupported = confusing UX.** When `BarcodeDetector` isn't available (iOS Safari, Firefox, older Chrome), it would show "Product not found" — misleading. **Fix:** new `"no_detector"` phase with a clear message and alternative options (type it in, scan receipt).
-
-Here's the full file to paste into `src/components/log/BarcodeScannerClient.tsx`:
-
-```tsx
 "use client";
 
 /**
@@ -574,4 +551,3 @@ export function BarcodeScannerClient() {
     </div>
   );
 }
-```
