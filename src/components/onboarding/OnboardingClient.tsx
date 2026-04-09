@@ -75,25 +75,26 @@ export function OnboardingClient() {
   };
 
   const handleEmailSubmit = async () => {
-    if (!email.includes("@")) return;
-    setLoading(true);
-    setLoginError(null);
-    try {
-      const result = await signIn("email-no-verify", {
-        email,
-        redirect: false,
-      });
-      if (result?.error) {
-        setLoginError("Something went wrong. Please try again.");
-      } else {
-        goNext();
-      }
-    } catch {
+  if (!email.includes("@")) return;
+  setLoading(true);
+  setLoginError(null);
+  try {
+    const res = await fetch("/api/auth/email-login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
+    });
+    if (!res.ok) {
       setLoginError("Something went wrong. Please try again.");
-    } finally {
-      setLoading(false);
+    } else {
+      goNext();
     }
-  };
+  } catch {
+    setLoginError("Something went wrong. Please try again.");
+  } finally {
+    setLoading(false);
+  }
+};
 
   const handleFinish = async () => {
     setLoading(true);
