@@ -3,14 +3,9 @@
  * DELETE /api/inventory/[id] — delete item
  */
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { getRequiredUserId } from "@/lib/auth-helpers";
 import { z } from "zod";
-
-async function getUserId(): Promise<string | null> {
-  const session = await auth().catch(() => null);
-  return session?.user?.id ?? null;
-}
 
 const UpdateItemSchema = z.object({
   status: z.enum(["ACTIVE", "EATEN", "THROWN_OUT", "STILL_HERE"]).optional(),
@@ -25,8 +20,7 @@ interface Params {
 }
 
 export async function PATCH(req: NextRequest, { params }: Params) {
-  const userId = await getUserId();
-  if (!userId) return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
+  const userId = await getRequiredUserId();
 
   const { id } = await params;
   const body = await req.json();
@@ -52,8 +46,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 }
 
 export async function DELETE(_req: NextRequest, { params }: Params) {
-  const userId = await getUserId();
-  if (!userId) return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
+  const userId = await getRequiredUserId();
 
   const { id } = await params;
   const existing = await prisma.inventoryItem.findFirst({ where: { id, userId } });

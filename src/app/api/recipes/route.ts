@@ -1,12 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { getRequiredUserId } from "@/lib/auth-helpers";
 import { z } from "zod";
-
-async function getUserId(): Promise<string | null> {
-  const session = await auth().catch(() => null);
-  return session?.user?.id ?? null;
-}
 
 const SaveRecipeSchema = z.object({
   title: z.string().min(1),
@@ -25,8 +20,7 @@ const SaveRecipeSchema = z.object({
 });
 
 export async function GET() {
-  const userId = await getUserId();
-  if (!userId) return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
+  const userId = await getRequiredUserId();
 
   const recipes = await prisma.savedRecipe.findMany({
     where: { userId },
@@ -37,8 +31,7 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const userId = await getUserId();
-  if (!userId) return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
+  const userId = await getRequiredUserId();
 
   const body = await req.json();
   const parsed = SaveRecipeSchema.safeParse(body);

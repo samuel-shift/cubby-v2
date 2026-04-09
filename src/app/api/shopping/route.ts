@@ -3,14 +3,9 @@
  * POST /api/shopping — add an item to the active shopping list
  */
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { getRequiredUserId } from "@/lib/auth-helpers";
 import { z } from "zod";
-
-async function getUserId(): Promise<string | null> {
-  const session = await auth().catch(() => null);
-  return session?.user?.id ?? null;
-}
 
 const AddItemSchema = z.object({
   name: z.string().min(1),
@@ -41,16 +36,14 @@ async function getOrCreateList(userId: string) {
 }
 
 export async function GET() {
-  const userId = await getUserId();
-  if (!userId) return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
+  const userId = await getRequiredUserId();
 
   const list = await getOrCreateList(userId);
   return NextResponse.json({ list });
 }
 
 export async function POST(req: NextRequest) {
-  const userId = await getUserId();
-  if (!userId) return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
+  const userId = await getRequiredUserId();
 
   const body = await req.json();
   const parsed = AddItemSchema.safeParse(body);

@@ -7,7 +7,7 @@
  * entryType: "receipt" | "snapshot" | "meal" | "waste"
  */
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/auth";
+import { getRequiredUserId } from "@/lib/auth-helpers";
 import Anthropic from "@anthropic-ai/sdk";
 
 const anthropic = new Anthropic({
@@ -43,8 +43,7 @@ const MODEL_MAP: Record<string, string> = {
 };
 
 export async function POST(req: NextRequest) {
-  const session = await auth();
-  if (!session?.user?.id) return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
+  await getRequiredUserId(); // ensure user exists (real or demo)
 
   const { imageBase64, entryType } = await req.json();
 
@@ -62,7 +61,7 @@ export async function POST(req: NextRequest) {
     data: imageBase64,
   };
 
-  const model = MODEL_MAP[entryType] ?? "claude-haiku-4-5-20251001";
+  const model = MODEL_MAP[entryType] ?? "claude-3-5-haiku-latest";
 
   const response = await anthropic.messages.create({
     model,

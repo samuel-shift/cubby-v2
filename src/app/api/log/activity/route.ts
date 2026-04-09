@@ -4,15 +4,10 @@
  * Used by cook mode (MEAL_COOKED), swipe status, etc.
  */
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { getRequiredUserId } from "@/lib/auth-helpers";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
-
-async function getUserId(): Promise<string | null> {
-  const session = await auth().catch(() => null);
-  return session?.user?.id ?? null;
-}
 
 const ActivitySchema = z.object({
   type: z.enum([
@@ -29,8 +24,7 @@ const ActivitySchema = z.object({
 });
 
 export async function POST(req: NextRequest) {
-  const userId = await getUserId();
-  if (!userId) return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
+  const userId = await getRequiredUserId();
 
   const body = await req.json();
   const parsed = ActivitySchema.safeParse(body);

@@ -1,21 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { getRequiredUserId } from "@/lib/auth-helpers";
 import Anthropic from "@anthropic-ai/sdk";
-
-async function getUserId(): Promise<string | null> {
-  const session = await auth().catch(() => null);
-  return session?.user?.id ?? null;
-}
 
 export const maxDuration = 45;
 
 const anthropic = new Anthropic();
 
 export async function POST(req: NextRequest) {
-  const userId = await getUserId();
-  if (!userId)
-    return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
+  const userId = await getRequiredUserId();
 
   const body = await req.json().catch(() => ({}));
   const {
@@ -122,7 +115,7 @@ Rules:
     async start(controller) {
       try {
         const anthropicStream = anthropic.messages.stream({
-          model: "claude-haiku-4-5-20251001",
+          model: "claude-3-5-haiku-latest",
           max_tokens: 4096,
           messages: [{ role: "user", content: prompt }],
         });

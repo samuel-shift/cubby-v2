@@ -4,14 +4,27 @@
  * KitchenSnapshotClient
  * Used by /log/snapshot
  *
- * Flow: take up to 5 photos of different parts of your kitchen
- *       → send each to Claude Vision (entryType: "snapshot")
- *       → merge all extracted items → review → batch save to inventory
+ * Ported from cubby-v1's proven two-page flow, adapted into a single-page component.
  *
- * Phases: "capture" | "processing" | "review" | "saving" | "success" | "error"
+ * Flow:
+ *   1. Live camera viewfinder (rear camera, getUserMedia) + gallery fallback
+ *   2. User captures one or more photos (max 5) with preview after each
+ *   3. All photos sent in one request to /api/inventory/snapshot
+ *   4. Review detected items (grouped by confidence threshold)
+ *   5. Batch save to /api/inventory
+ *
+ * Key V1 features preserved:
+ *   - Image compression (max 1024px, JPEG 80%)
+ *   - All photos sent at once (not one-by-one)
+ *   - Numeric confidence (0.0–1.0) with 0.75 threshold
+ *   - Vision error codes (TOO_DARK, NO_FOOD, BLURRY)
+ *   - Torch/flash toggle
+ *   - productName/brand fields (not generic "name")
+ *
+ * Phases: "camera" | "preview" | "processing" | "review" | "saving" | "success" | "error"
  */
 
-import { useRef, useState, useCallback } from "react";
+import { useRef, useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import {
   Camera,
@@ -22,235 +35,373 @@ import {
   ChevronDown,
   ChevronUp,
   X,
+  Minus,
+  Images,
+  Zap,
+  ZapOff,
+  RotateCcw,
+  Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PageHeader } from "@/components/ui/PageHeader";
 
-type Phase = "capture" | "processing" | "review" | "saving" | "success" | "error";
-type StorageLocation = "FRIDGE" | "FREEZER" | "PANTRY" | "COUNTER" | "CUPBOARD";
-type Confidence = "high" | "medium" | "low";
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
 
-interface SnapshotItem {
-  id: string;
-  name: string;
-  quantity: number;
-  unit?: string;
-  category: string;
-  location: StorageLocation;
-  confidence: Confidence;
-  selected: boolean;
-  sourcePhoto: number; // which photo index it came from
-}
+type Phase = "camera" | "preview" | "processing" | "review" | "saving" | "success" | "error";
+type StorageLocation = "FRIDGE" | "FREEZER" | "PANTRY" | "OTHER";
 
 interface CapturedPhoto {
-  dataUrl: string;
-  label: string; // e.g. "Fridge", "Cupboard", "Counter"
+  dataUrl: string; // full data URL — used for display
+  base64: string;  // pure base64 (no prefix) — sent to the API
+  mimeType: "image/jpeg";
 }
 
-const PHOTO_LABELS = ["Fridge", "Cupboard", "Counter", "Freezer", "Pantry"];
+interface DetectedItem {
+  productName: string;
+  brand: string | null;
+  category: string;
+  storageLocation: StorageLocation;
+  quantity: number;
+  unit: string | null;
+  confidence: number; // 0.0 – 1.0
+  included: boolean;  // user toggle for save
+}
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+const MAX_PHOTOS = 5;
+const MAX_SIDE_PX = 1024;
+const JPEG_QUALITY = 0.8;
+const CONFIDENCE_THRESHOLD = 0.75;
+
+const PROCESSING_MESSAGES = ["Identifying your food...", "Looking for items...", "Almost there..."];
+
+const VISION_ERROR_MESSAGES: Record<string, string> = {
+  TOO_DARK: "That photo's a bit dark — try turning on the flash or better lighting.",
+  NO_FOOD: "We couldn't spot any food in that photo — try a different angle.",
+  BLURRY: "The photo's a bit blurry — hold still and try again.",
+  default: "Something went wrong processing your photos — please try again.",
+};
 
 const STORAGE_OPTIONS: { id: StorageLocation; label: string; emoji: string }[] = [
-  { id: "FRIDGE",   label: "Fridge",   emoji: "🧊" },
-  { id: "FREEZER",  label: "Freezer",  emoji: "❄️" },
-  { id: "PANTRY",   label: "Pantry",   emoji: "🏪" },
-  { id: "COUNTER",  label: "Counter",  emoji: "🍌" },
-  { id: "CUPBOARD", label: "Cupboard", emoji: "📦" },
+  { id: "FRIDGE",  label: "Fridge",  emoji: "🧊" },
+  { id: "FREEZER", label: "Freezer", emoji: "❄️" },
+  { id: "PANTRY",  label: "Pantry",  emoji: "🏪" },
+  { id: "OTHER",   label: "Other",   emoji: "📦" },
 ];
 
-function inferLocation(storageLocation?: string): StorageLocation {
-  if (!storageLocation) return "PANTRY";
-  const s = storageLocation.toLowerCase();
-  if (s.includes("fridge") || s.includes("refrigerator")) return "FRIDGE";
-  if (s.includes("freezer")) return "FREEZER";
-  if (s.includes("counter")) return "COUNTER";
-  if (s.includes("cupboard") || s.includes("cabinet")) return "CUPBOARD";
-  return "PANTRY";
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/** Compress a video frame or image onto a canvas, return dataUrl + base64. */
+function compressToCanvas(
+  canvas: HTMLCanvasElement,
+  source: CanvasImageSource,
+  sourceWidth: number,
+  sourceHeight: number
+): { dataUrl: string; base64: string } {
+  const scale = Math.min(1, MAX_SIDE_PX / Math.max(sourceWidth, sourceHeight));
+  canvas.width = Math.round(sourceWidth * scale);
+  canvas.height = Math.round(sourceHeight * scale);
+  const ctx = canvas.getContext("2d")!;
+  ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
+  const dataUrl = canvas.toDataURL("image/jpeg", JPEG_QUALITY);
+  const base64 = dataUrl.split(",")[1];
+  return { dataUrl, base64 };
 }
 
-const sectionConfig: { key: Confidence; label: string; description: string; color: string }[] = [
-  { key: "high",   label: "Identified",        description: "High confidence",        color: "text-cubby-green" },
-  { key: "medium", label: "Worth checking",     description: "Tap to review",         color: "text-amber-600" },
-  { key: "low",    label: "Not sure about these", description: "Remove if wrong",     color: "text-cubby-urgent" },
-];
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
 
 export function KitchenSnapshotClient() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const streamRef = useRef<MediaStream | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const pendingPhotoRef = useRef<CapturedPhoto | null>(null);
 
-  const [phase, setPhase] = useState<Phase>("capture");
+  const [phase, setPhase] = useState<Phase>("camera");
   const [photos, setPhotos] = useState<CapturedPhoto[]>([]);
-  const [cameraActive, setCameraActive] = useState(false);
-  const [items, setItems] = useState<SnapshotItem[]>([]);
-  const [expandedSections, setExpandedSections] = useState<Record<Confidence, boolean>>({
-    high: false, medium: true, low: true,
-  });
+  const [previewDataUrl, setPreviewDataUrl] = useState<string | null>(null);
+  const [items, setItems] = useState<DetectedItem[]>([]);
   const [addedCount, setAddedCount] = useState(0);
-  const [processingStatus, setProcessingStatus] = useState("");
-  const [errorType, setErrorType] = useState<"auth" | "empty" | "network">("empty");
 
-  const MAX_PHOTOS = 5;
+  // Camera state
+  const [torchOn, setTorchOn] = useState(false);
+  const [torchSupported, setTorchSupported] = useState(false);
+  const [cameraReady, setCameraReady] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
 
-  // ─── Camera ──────────────────────────────────────────────────────────────
+  // Processing state
+  const [processingMsg, setProcessingMsg] = useState(PROCESSING_MESSAGES[0]);
+  const [errorMessage, setErrorMessage] = useState("");
 
-  const startCamera = useCallback(async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment" },
-      });
-      streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-        setCameraActive(true);
+  // Review state
+  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
+    check: true,
+    identified: false,
+  });
+
+  // ─── Camera initialisation ────────────────────────────────────────────────
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function initCamera() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: { ideal: "environment" },
+            width: { ideal: 1920 },
+            height: { ideal: 1080 },
+          },
+          audio: false,
+        });
+
+        if (cancelled) {
+          stream.getTracks().forEach((t) => t.stop());
+          return;
+        }
+
+        streamRef.current = stream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+        }
+
+        // Detect torch support
+        const track = stream.getVideoTracks()[0];
+        const caps = track.getCapabilities() as Record<string, unknown>;
+        if (caps.torch) setTorchSupported(true);
+      } catch {
+        if (!cancelled) {
+          setCameraError(
+            "Camera access denied. Allow camera access and try again, or tap the gallery icon to upload a photo."
+          );
+        }
       }
-    } catch {
-      // Camera unavailable — file upload fallback available
     }
+
+    initCamera();
+
+    return () => {
+      cancelled = true;
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+    };
   }, []);
 
-  const stopCamera = useCallback(() => {
-    streamRef.current?.getTracks().forEach((t) => t.stop());
-    streamRef.current = null;
-    setCameraActive(false);
-  }, []);
+  // Re-attach stream when returning to camera phase
+  useEffect(() => {
+    if (phase === "camera" && videoRef.current && streamRef.current) {
+      videoRef.current.srcObject = streamRef.current;
+      setCameraReady(false);
+    }
+  }, [phase]);
 
-  function capturePhoto() {
-    if (!videoRef.current || !canvasRef.current) return;
+  // Rotate processing message
+  useEffect(() => {
+    if (phase !== "processing") return;
+    let idx = 0;
+    const id = setInterval(() => {
+      idx = (idx + 1) % PROCESSING_MESSAGES.length;
+      setProcessingMsg(PROCESSING_MESSAGES[idx]);
+    }, 2200);
+    return () => clearInterval(id);
+  }, [phase]);
+
+  // ─── Torch toggle ─────────────────────────────────────────────────────────
+
+  const toggleTorch = useCallback(async () => {
+    const track = streamRef.current?.getVideoTracks()[0];
+    if (!track) return;
+    try {
+      await track.applyConstraints({
+        advanced: [{ torch: !torchOn } as MediaTrackConstraintSet],
+      });
+      setTorchOn((v) => !v);
+    } catch {
+      // Torch not supported on this hardware
+    }
+  }, [torchOn]);
+
+  // ─── Capture frame from live viewfinder ───────────────────────────────────
+
+  const handleCapture = useCallback(() => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    canvas.getContext("2d")?.drawImage(video, 0, 0);
-    const dataUrl = canvas.toDataURL("image/jpeg", 0.80);
-    const label = PHOTO_LABELS[photos.length] ?? `Photo ${photos.length + 1}`;
-    setPhotos((prev) => [...prev, { dataUrl, label }]);
-    stopCamera();
-  }
+    if (!video || !canvas || !cameraReady) return;
 
-  function removePhoto(index: number) {
-    setPhotos((prev) => prev.filter((_, i) => i !== index));
-  }
+    const { dataUrl, base64 } = compressToCanvas(
+      canvas, video, video.videoWidth, video.videoHeight
+    );
 
-  // ─── File upload fallback ─────────────────────────────────────────────────
+    const photo: CapturedPhoto = { dataUrl, base64, mimeType: "image/jpeg" };
+    pendingPhotoRef.current = photo;
+    setPreviewDataUrl(dataUrl);
+    setPhase("preview");
+  }, [cameraReady]);
 
-  function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(e.target.files ?? []);
-    const currentCount = photos.length;
-    const remaining = MAX_PHOTOS - currentCount;
-    files.slice(0, remaining).forEach((file, i) => {
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        const dataUrl = ev.target?.result as string;
-        setPhotos((prev) => {
-          const label = PHOTO_LABELS[prev.length] ?? `Photo ${prev.length + 1}`;
-          return [...prev, { dataUrl, label }];
-        });
-      };
-      reader.readAsDataURL(file);
-    });
-    // reset so same file can be re-selected
+  // ─── Gallery / file upload ────────────────────────────────────────────────
+
+  const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const objectUrl = URL.createObjectURL(file);
+    const img = new window.Image();
+
+    img.onload = () => {
+      const canvas = canvasRef.current!;
+      const { dataUrl, base64 } = compressToCanvas(
+        canvas, img, img.naturalWidth, img.naturalHeight
+      );
+      URL.revokeObjectURL(objectUrl);
+
+      const photo: CapturedPhoto = { dataUrl, base64, mimeType: "image/jpeg" };
+      pendingPhotoRef.current = photo;
+      setPreviewDataUrl(dataUrl);
+      setPhase("preview");
+    };
+
+    img.onerror = () => URL.revokeObjectURL(objectUrl);
+    img.src = objectUrl;
     e.target.value = "";
-  }
+  }, []);
 
-  // ─── Process all photos ───────────────────────────────────────────────────
+  // ─── Preview actions ──────────────────────────────────────────────────────
 
-  async function processPhotos() {
-    if (photos.length === 0) return;
+  const retake = useCallback(() => {
+    pendingPhotoRef.current = null;
+    setPreviewDataUrl(null);
+    setPhase("camera");
+  }, []);
+
+  const addAnother = useCallback(() => {
+    if (!pendingPhotoRef.current) return;
+    setPhotos((prev) => [...prev, pendingPhotoRef.current!]);
+    pendingPhotoRef.current = null;
+    setPreviewDataUrl(null);
+    setPhase("camera");
+  }, []);
+
+  const confirmAndProcess = useCallback(() => {
+    if (!pendingPhotoRef.current) return;
+    const allPhotos = [...photos, pendingPhotoRef.current];
+    pendingPhotoRef.current = null;
+    setPreviewDataUrl(null);
+    setPhotos(allPhotos);
+    processPhotos(allPhotos);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [photos]);
+
+  // Process already-confirmed photos (Done button)
+  const handleProcessNow = useCallback(() => {
+    processPhotos(photos);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [photos]);
+
+  // ─── Vision API call (all photos at once, like V1) ────────────────────────
+
+  async function processPhotos(photosToProcess: CapturedPhoto[]) {
     setPhase("processing");
-    const allItems: SnapshotItem[] = [];
-    let authFailed = false;
-    let networkFailed = false;
+    setProcessingMsg(PROCESSING_MESSAGES[0]);
 
-    for (let i = 0; i < photos.length; i++) {
-      setProcessingStatus(`Scanning photo ${i + 1} of ${photos.length}…`);
-      try {
-        const base64 = photos[i].dataUrl.split(",")[1];
-        const res = await fetch("/api/log/vision", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ imageBase64: base64, entryType: "snapshot" }),
-        });
+    try {
+      const res = await fetch("/api/inventory/snapshot", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          images: photosToProcess.map((p) => ({
+            data: p.base64,
+            mimeType: p.mimeType,
+          })),
+        }),
+      });
 
-        if (res.status === 401) { authFailed = true; break; }
-        if (!res.ok) { networkFailed = true; continue; }
+      const data = await res.json();
 
-        const data = await res.json();
-
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const extracted = Array.isArray(data.extracted) ? data.extracted : [];
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        extracted.forEach((item: any, j: number) => {
-          allItems.push({
-            id: `snap-${i}-${j}`,
-            name: item.name ?? "Unknown",
-            quantity: item.quantity ?? 1,
-            unit: item.unit,
-            category: item.category ?? "other",
-            location: inferLocation(item.storageLocation),
-            confidence: item.confidence ?? "medium",
-            selected: true,
-            sourcePhoto: i,
-          });
-        });
-      } catch {
-        networkFailed = true;
-        // continue with other photos
+      if (!res.ok) {
+        throw new Error(data.error || "Processing failed");
       }
-    }
 
-    if (authFailed) {
-      setErrorType("auth");
+      // Handle vision-level errors (dark, no food, blurry)
+      if (data.error) {
+        setErrorMessage(VISION_ERROR_MESSAGES[data.error] ?? VISION_ERROR_MESSAGES.default);
+        setPhase("error");
+        return;
+      }
+
+      const detected: DetectedItem[] = (data.items ?? []).map(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (item: any) => ({
+          productName: item.productName ?? "Unknown",
+          brand: item.brand ?? null,
+          category: item.category ?? "Other",
+          storageLocation: item.storageLocation ?? "PANTRY",
+          quantity: item.quantity ?? 1,
+          unit: item.unit ?? null,
+          confidence: typeof item.confidence === "number" ? item.confidence : 0.5,
+          included: true,
+        })
+      );
+
+      if (detected.length === 0) {
+        setErrorMessage(VISION_ERROR_MESSAGES.NO_FOOD);
+        setPhase("error");
+        return;
+      }
+
+      setItems(detected);
+      // Auto-expand "check these" if there are low-confidence items
+      const hasLowConf = detected.some((i) => i.confidence < CONFIDENCE_THRESHOLD);
+      setExpandedSections({
+        check: true,
+        identified: !hasLowConf, // collapse if there are items to check first
+      });
+      setPhase("review");
+    } catch {
+      setErrorMessage(VISION_ERROR_MESSAGES.default);
       setPhase("error");
-      return;
     }
-
-    // Deduplicate by name (case-insensitive)
-    const seen = new Set<string>();
-    const deduped = allItems.filter((item) => {
-      const key = item.name.toLowerCase();
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-
-    if (deduped.length === 0) {
-      setErrorType(networkFailed ? "network" : "empty");
-      setPhase("error");
-      return;
-    }
-
-    setItems(deduped);
-    setPhase("review");
   }
 
   // ─── Review helpers ───────────────────────────────────────────────────────
 
-  function updateItem(id: string, patch: Partial<SnapshotItem>) {
-    setItems((prev) => prev.map((i) => (i.id === id ? { ...i, ...patch } : i)));
+  function toggleItem(index: number) {
+    setItems((prev) =>
+      prev.map((item, i) => (i === index ? { ...item, included: !item.included } : item))
+    );
   }
 
-  function removeItem(id: string) {
-    setItems((prev) => prev.filter((i) => i.id !== id));
+  function updateField(index: number, field: string, value: unknown) {
+    setItems((prev) =>
+      prev.map((item, i) => (i === index ? { ...item, [field]: value } : item))
+    );
   }
 
-  function toggleSection(conf: Confidence) {
-    setExpandedSections((s) => ({ ...s, [conf]: !s[conf] }));
+  function removeItem(index: number) {
+    setItems((prev) => prev.filter((_, i) => i !== index));
   }
 
-  const grouped = {
-    high:   items.filter((i) => i.confidence === "high"),
-    medium: items.filter((i) => i.confidence === "medium"),
-    low:    items.filter((i) => i.confidence === "low"),
-  };
+  const highConfidence = items
+    .map((item, i) => ({ item, i }))
+    .filter(({ item }) => item.confidence >= CONFIDENCE_THRESHOLD);
 
-  const selectedCount = items.filter((i) => i.selected).length;
+  const needsCheck = items
+    .map((item, i) => ({ item, i }))
+    .filter(({ item }) => item.confidence < CONFIDENCE_THRESHOLD);
+
+  const includedCount = items.filter((i) => i.included).length;
 
   // ─── Save to inventory ────────────────────────────────────────────────────
 
   async function handleSave() {
-    const toSave = items.filter((i) => i.selected);
+    const toSave = items.filter((i) => i.included);
     if (toSave.length === 0) return;
     setPhase("saving");
 
@@ -261,11 +412,11 @@ export function KitchenSnapshotClient() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            name: item.name,
+            name: item.productName,
             quantity: item.quantity,
             unit: item.unit,
             category: item.category,
-            location: item.location,
+            location: item.storageLocation === "OTHER" ? "PANTRY" : item.storageLocation,
             entryMethod: "SNAPSHOT",
           }),
         });
@@ -277,7 +428,7 @@ export function KitchenSnapshotClient() {
     setPhase("success");
   }
 
-  // ─── Render ───────────────────────────────────────────────────────────────
+  // ─── Render: Success ──────────────────────────────────────────────────────
 
   if (phase === "success") {
     return (
@@ -288,14 +439,20 @@ export function KitchenSnapshotClient() {
           </div>
           <div>
             <p className="font-black text-cubby-charcoal text-lg">{addedCount} items added!</p>
-            <p className="text-cubby-taupe text-sm mt-1">Your kitchen is in Cubby 🧡</p>
+            <p className="text-cubby-taupe text-sm mt-1">Your kitchen is in Cubby</p>
           </div>
           <div className="space-y-3 pt-2">
             <button
-              onClick={() => { setPhase("capture"); setPhotos([]); setItems([]); }}
+              onClick={() => {
+                setPhase("camera");
+                setPhotos([]);
+                setItems([]);
+                setCameraReady(false);
+              }}
               className="w-full bg-cubby-green text-white py-3.5 rounded-2xl font-black text-sm active:scale-[0.97] transition-transform"
             >
-              Scan another area
+              <Camera className="w-4 h-4 inline mr-2" />
+              Take another photo
             </button>
             <Link
               href="/pantry"
@@ -309,284 +466,465 @@ export function KitchenSnapshotClient() {
     );
   }
 
+  // ─── Render: Error ────────────────────────────────────────────────────────
+
   if (phase === "error") {
-    const errorMessages = {
-      auth:    { emoji: "🔐", title: "You need to be signed in", body: "Sign in to use the kitchen scanner — it runs on Claude Vision which needs your account." },
-      network: { emoji: "📡", title: "Connection issue", body: "Something went wrong contacting the scanner. Check your connection and try again." },
-      empty:   { emoji: "📷", title: "Couldn't spot anything", body: "Try photos in brighter light, or get closer to the shelves. Make sure food packaging is visible." },
-    };
-    const { emoji, title, body } = errorMessages[errorType];
     return (
       <div className="min-h-screen bg-cubby-stone">
         <PageHeader title="Kitchen snapshot" backHref="/log" />
         <div className="px-4 pt-12 text-center space-y-4">
-          <p className="text-4xl">{emoji}</p>
-          <p className="font-black text-cubby-charcoal text-lg">{title}</p>
-          <p className="text-cubby-taupe text-sm">{body}</p>
-          {errorType === "auth" ? (
-            <Link
-              href="/auth/verify"
-              className="w-full bg-cubby-green text-white py-3.5 rounded-2xl font-black text-sm flex items-center justify-center gap-2"
-            >
-              Sign in to continue
-            </Link>
-          ) : (
-            <button
-              onClick={() => { setPhase("capture"); setPhotos([]); }}
-              className="w-full bg-cubby-green text-white py-3.5 rounded-2xl font-black text-sm flex items-center justify-center gap-2"
-            >
-              <RefreshCw className="w-4 h-4" /> Try again
-            </button>
-          )}
+          <p className="text-4xl">📷</p>
+          <p className="font-black text-cubby-charcoal text-lg">Couldn't process photo</p>
+          <p className="text-cubby-taupe text-sm">{errorMessage}</p>
+          <button
+            onClick={() => {
+              setPhase("camera");
+              setPhotos([]);
+            }}
+            className="w-full bg-cubby-green text-white py-3.5 rounded-2xl font-black text-sm flex items-center justify-center gap-2"
+          >
+            <RefreshCw className="w-4 h-4" /> Try again
+          </button>
+          <Link
+            href="/log/type"
+            className="block text-sm text-cubby-taupe underline underline-offset-2"
+          >
+            Type it in instead
+          </Link>
         </div>
       </div>
     );
   }
 
+  // ─── Render: Processing ───────────────────────────────────────────────────
+
+  if (phase === "processing") {
+    return (
+      <div className="relative flex min-h-screen flex-col items-center justify-center bg-black">
+        {photos.length > 0 && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={photos[photos.length - 1].dataUrl}
+            alt=""
+            aria-hidden
+            className="absolute inset-0 h-full w-full object-cover opacity-25 blur-2xl"
+          />
+        )}
+        <div className="relative z-10 mx-8 rounded-card bg-cubby-cream px-8 py-10 text-center">
+          <Loader2 className="mx-auto mb-4 h-10 w-10 animate-spin text-cubby-green" />
+          <p className="font-black text-cubby-charcoal">{processingMsg}</p>
+          <p className="text-cubby-taupe text-sm mt-1">This usually takes a few seconds</p>
+        </div>
+      </div>
+    );
+  }
+
+  // ─── Render: Preview ──────────────────────────────────────────────────────
+
+  if (phase === "preview" && previewDataUrl) {
+    return (
+      <div className="relative flex min-h-screen flex-col bg-black">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={previewDataUrl}
+          alt="Captured photo preview"
+          className="absolute inset-0 h-full w-full object-contain"
+        />
+
+        {/* Photo counter */}
+        {photos.length > 0 && (
+          <div className="absolute left-1/2 top-14 z-10 -translate-x-1/2 rounded-full bg-black/60 px-3 py-1.5 text-xs font-black text-white backdrop-blur-sm">
+            Photo {photos.length + 1} of {photos.length + 1}
+          </div>
+        )}
+
+        {/* Bottom gradient */}
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-52 bg-gradient-to-t from-black/90 to-transparent" />
+
+        {/* Actions */}
+        <div className="absolute bottom-0 left-0 right-0 z-10 px-5 pb-12">
+          <div className="flex gap-3">
+            <button
+              onClick={retake}
+              className="flex flex-1 items-center justify-center gap-2 rounded-2xl border border-white/30 py-3.5 text-sm font-black text-white backdrop-blur-sm"
+            >
+              <RotateCcw className="h-4 w-4" />
+              Retake
+            </button>
+
+            {photos.length < MAX_PHOTOS - 1 && (
+              <button
+                onClick={addAnother}
+                className="flex flex-1 items-center justify-center gap-2 rounded-2xl border border-white/30 py-3.5 text-sm font-black text-white backdrop-blur-sm"
+              >
+                <Plus className="h-4 w-4" />
+                Add another
+              </button>
+            )}
+
+            <button
+              onClick={confirmAndProcess}
+              className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-cubby-lime py-3.5 text-sm font-black text-cubby-green"
+            >
+              <Check className="h-4 w-4" />
+              Use photo
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ─── Render: Review ───────────────────────────────────────────────────────
+
+  if (phase === "review") {
+    return (
+      <div className="min-h-screen bg-cubby-stone pb-32">
+        <PageHeader title="Kitchen snapshot" backHref="/log" />
+
+        {/* Headline */}
+        <div className="px-4 pb-3 flex items-center gap-4">
+          {photos.length > 0 && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={photos[0].dataUrl}
+              alt="Kitchen snapshot"
+              className="h-14 w-14 shrink-0 rounded-xl object-cover"
+            />
+          )}
+          <div>
+            <p className="font-black text-cubby-charcoal text-lg">
+              We spotted {items.length} {items.length === 1 ? "item" : "items"}
+            </p>
+            <p className="text-xs text-cubby-taupe">
+              Review below, then add them to your Cubby.
+            </p>
+          </div>
+        </div>
+
+        <div className="px-4 space-y-3">
+          {/* Needs checking section */}
+          {needsCheck.length > 0 && (
+            <div className="bg-cubby-cream rounded-card overflow-hidden">
+              <button
+                onClick={() => setExpandedSections((s) => ({ ...s, check: !s.check }))}
+                className="w-full px-4 py-3.5 flex items-center justify-between"
+              >
+                <div>
+                  <span className="font-black text-sm text-amber-600">Check these</span>
+                  <span className="text-cubby-taupe text-xs ml-2">({needsCheck.length})</span>
+                  <p className="text-xs text-cubby-taupe mt-0.5">Tap to review — might not be right</p>
+                </div>
+                {expandedSections.check
+                  ? <ChevronUp className="w-4 h-4 text-cubby-taupe" />
+                  : <ChevronDown className="w-4 h-4 text-cubby-taupe" />}
+              </button>
+
+              {expandedSections.check && (
+                <div className="divide-y divide-cubby-stone">
+                  {needsCheck.map(({ item, i }) => (
+                    <ReviewItemCard
+                      key={i}
+                      item={item}
+                      index={i}
+                      onToggle={toggleItem}
+                      onFieldChange={updateField}
+                      onRemove={removeItem}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* High confidence section */}
+          {highConfidence.length > 0 && (
+            <div className="bg-cubby-cream rounded-card overflow-hidden">
+              <button
+                onClick={() => setExpandedSections((s) => ({ ...s, identified: !s.identified }))}
+                className="w-full px-4 py-3.5 flex items-center justify-between"
+              >
+                <div>
+                  <span className="font-black text-sm text-cubby-green">Identified</span>
+                  <span className="text-cubby-taupe text-xs ml-2">({highConfidence.length})</span>
+                  <p className="text-xs text-cubby-taupe mt-0.5">High confidence</p>
+                </div>
+                {expandedSections.identified
+                  ? <ChevronUp className="w-4 h-4 text-cubby-taupe" />
+                  : <ChevronDown className="w-4 h-4 text-cubby-taupe" />}
+              </button>
+
+              {expandedSections.identified && (
+                <div className="divide-y divide-cubby-stone">
+                  {highConfidence.map(({ item, i }) => (
+                    <ReviewItemCard
+                      key={i}
+                      item={item}
+                      index={i}
+                      onToggle={toggleItem}
+                      onFieldChange={updateField}
+                      onRemove={removeItem}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Sticky save bar */}
+        <div className="fixed bottom-0 left-0 right-0 bg-cubby-stone/95 backdrop-blur-sm px-4 pb-6 pt-3 border-t border-black/5">
+          <button
+            onClick={handleSave}
+            disabled={includedCount === 0}
+            className={cn(
+              "w-full bg-cubby-green text-white py-4 rounded-2xl font-black text-base",
+              "flex items-center justify-center gap-2 active:scale-[0.97] transition-all",
+              includedCount === 0 && "opacity-40"
+            )}
+          >
+            <Check className="w-5 h-5" strokeWidth={3} />
+            Add {includedCount} item{includedCount !== 1 ? "s" : ""} to Cubby
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ─── Render: Saving overlay ───────────────────────────────────────────────
+
+  if (phase === "saving") {
+    return (
+      <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+        <div className="bg-cubby-cream rounded-card px-8 py-6 text-center space-y-3">
+          <Loader2 className="w-10 h-10 animate-spin text-cubby-green mx-auto" />
+          <p className="font-black text-cubby-charcoal">Saving items…</p>
+        </div>
+      </div>
+    );
+  }
+
+  // ─── Render: Camera viewfinder ────────────────────────────────────────────
+
   return (
-    <div className="min-h-screen bg-cubby-stone">
-      <PageHeader title="Kitchen snapshot" backHref="/log" />
+    <div className="relative flex min-h-screen flex-col bg-black">
+      {/* Hidden utilities */}
       <canvas ref={canvasRef} className="hidden" />
       <input
         ref={fileInputRef}
         type="file"
         accept="image/*"
-        multiple
-        className="hidden"
-        onChange={handleFileUpload}
+        className="sr-only"
+        onChange={handleFileChange}
       />
 
-      {/* ── Capture phase ── */}
-      {phase === "capture" && (
-        <div className="px-4 space-y-4 pb-10">
-          <p className="text-cubby-taupe text-sm font-semibold">
-            Take up to {MAX_PHOTOS} photos of different parts of your kitchen — fridge, cupboards, counter, anywhere food lives.
-          </p>
+      {/* Live video stream */}
+      {!cameraError && (
+        <video
+          ref={videoRef}
+          autoPlay
+          playsInline
+          muted
+          className="absolute inset-0 h-full w-full object-cover"
+          onCanPlay={() => setCameraReady(true)}
+        />
+      )}
 
-          {/* Photo thumbnails */}
-          {photos.length > 0 && (
-            <div className="grid grid-cols-3 gap-2">
-              {photos.map((photo, i) => (
-                <div key={i} className="relative rounded-2xl overflow-hidden aspect-square bg-black">
-                  <img src={photo.dataUrl} alt={photo.label} className="w-full h-full object-cover" />
-                  <div className="absolute bottom-0 left-0 right-0 bg-black/50 px-2 py-1">
-                    <p className="text-white text-[10px] font-black truncate">{photo.label}</p>
-                  </div>
-                  <button
-                    onClick={() => removePhoto(i)}
-                    className="absolute top-1.5 right-1.5 w-6 h-6 bg-black/60 rounded-full flex items-center justify-center"
-                  >
-                    <X className="w-3.5 h-3.5 text-white" />
-                  </button>
-                </div>
-              ))}
-
-              {/* Add more button */}
-              {photos.length < MAX_PHOTOS && (
-                <button
-                  onClick={startCamera}
-                  className="aspect-square rounded-2xl border-2 border-dashed border-cubby-taupe/30 flex flex-col items-center justify-center gap-1 text-cubby-taupe active:scale-95 transition-transform"
-                >
-                  <Plus className="w-6 h-6" />
-                  <span className="text-[10px] font-black">Add photo</span>
-                </button>
-              )}
-            </div>
-          )}
-
-          {/* Camera live view */}
-          {cameraActive && (
-            <div className="space-y-3">
-              <div className="relative rounded-card overflow-hidden bg-black aspect-[4/3] max-h-[50vh]">
-                <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
-                <p className="absolute bottom-4 left-1/2 -translate-x-1/2 text-white text-xs font-black bg-black/50 px-3 py-1.5 rounded-full whitespace-nowrap">
-                  {PHOTO_LABELS[photos.length] ?? "Another area"}
-                </p>
-              </div>
-              <button
-                onClick={capturePhoto}
-                className="w-full bg-cubby-green text-white py-4 rounded-2xl font-black text-base flex items-center justify-center gap-2 active:scale-[0.97] transition-transform"
-              >
-                <Camera className="w-5 h-5" /> Take photo
-              </button>
-              <button onClick={stopCamera} className="w-full text-cubby-taupe text-sm font-semibold py-2">
-                Cancel
-              </button>
-            </div>
-          )}
-
-          {/* Initial state — no photos yet */}
-          {photos.length === 0 && !cameraActive && (
-            <div className="space-y-3">
-              <button
-                onClick={startCamera}
-                className="w-full bg-cubby-green text-white py-5 rounded-card flex items-center justify-center gap-3 font-black text-base active:scale-[0.97] transition-transform"
-              >
-                <Camera className="w-6 h-6" />
-                Open camera
-              </button>
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                className="w-full bg-cubby-cream text-cubby-charcoal py-4 rounded-card flex items-center justify-center gap-3 font-black text-sm active:scale-[0.97] transition-transform"
-              >
-                Upload from photos
-              </button>
-            </div>
-          )}
-
-          {/* Upload more / scan */}
-          {photos.length > 0 && !cameraActive && (
-            <div className="space-y-3">
-              {photos.length < MAX_PHOTOS && (
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  className="w-full bg-cubby-cream text-cubby-charcoal py-3 rounded-2xl font-black text-sm flex items-center justify-center gap-2 active:scale-[0.97] transition-transform"
-                >
-                  <Plus className="w-4 h-4" /> Upload more photos
-                </button>
-              )}
-
-              <button
-                onClick={processPhotos}
-                className="w-full bg-cubby-green text-white py-4 rounded-2xl font-black text-base flex items-center justify-center gap-2 active:scale-[0.97] transition-transform"
-              >
-                <Check className="w-5 h-5" strokeWidth={3} />
-                Scan {photos.length} photo{photos.length !== 1 ? "s" : ""}
-              </button>
-            </div>
-          )}
-
-          {/* Tips */}
-          <div className="bg-cubby-cream rounded-card px-4 py-4 space-y-2">
-            <p className="text-xs font-black text-cubby-taupe uppercase tracking-wider">Tips for best results</p>
-            <ul className="space-y-1.5 text-sm text-cubby-taupe">
-              <li>📸 Good light and close-up shots work best</li>
-              <li>🧊 Open your fridge for a clear view</li>
-              <li>📦 Get the front of cupboard shelves</li>
-              <li>🔢 Up to {MAX_PHOTOS} photos per scan</li>
-            </ul>
-          </div>
+      {/* Camera unavailable fallback */}
+      {cameraError && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center px-10 text-center">
+          <Camera className="mb-4 h-12 w-12 text-white/40" />
+          <p className="text-sm leading-relaxed text-white/70">{cameraError}</p>
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            className="mt-6 rounded-2xl bg-cubby-lime px-6 py-3 text-sm font-black text-cubby-green"
+          >
+            Upload from gallery
+          </button>
         </div>
       )}
 
-      {/* ── Processing phase ── */}
-      {phase === "processing" && (
-        <div className="px-4 pt-16 text-center space-y-6">
-          <div className="grid grid-cols-3 gap-2 mb-4">
-            {photos.slice(0, 3).map((p, i) => (
-              <img key={i} src={p.dataUrl} alt={p.label} className="rounded-2xl aspect-square object-cover opacity-60" />
+      {/* Gradient overlays */}
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-40 bg-gradient-to-b from-black/70 to-transparent" />
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-52 bg-gradient-to-t from-black/80 to-transparent" />
+
+      {/* Top bar: Close · Photo count · Torch */}
+      <div className="absolute left-0 right-0 top-0 z-10 flex items-center justify-between px-5 pt-14">
+        <Link
+          href="/log"
+          className="rounded-full bg-black/40 p-2.5 text-white backdrop-blur-sm"
+          aria-label="Close"
+        >
+          <X className="h-5 w-5" />
+        </Link>
+
+        {photos.length > 0 && (
+          <div className="flex items-center gap-1.5 rounded-full bg-cubby-lime/90 px-3 py-1.5 text-xs font-black text-cubby-green">
+            <Camera className="h-3.5 w-3.5" />
+            {photos.length} {photos.length === 1 ? "photo" : "photos"} captured
+          </div>
+        )}
+
+        {torchSupported ? (
+          <button
+            onClick={toggleTorch}
+            className="rounded-full bg-black/40 p-2.5 backdrop-blur-sm"
+            aria-label={torchOn ? "Turn off flash" : "Turn on flash"}
+          >
+            {torchOn ? (
+              <Zap className="h-5 w-5 text-cubby-lime" />
+            ) : (
+              <ZapOff className="h-5 w-5 text-white" />
+            )}
+          </button>
+        ) : (
+          <div className="w-10" />
+        )}
+      </div>
+
+      {/* Instructions */}
+      <div className="absolute left-0 right-0 top-28 z-10 px-6 text-center">
+        <p className="text-xl font-black text-white drop-shadow-md">Capture your kitchen</p>
+        <p className="mt-1 text-sm text-white/80 drop-shadow">
+          {photos.length === 0
+            ? "Take a photo of your fridge, pantry, or countertop"
+            : "Take another photo, or tap Done to process"}
+        </p>
+      </div>
+
+      {/* Privacy note */}
+      <div className="absolute bottom-36 left-0 right-0 z-10 px-6 text-center">
+        <p className="text-xs text-white/40">
+          Your photo is analysed and then discarded — it&apos;s never stored.
+        </p>
+      </div>
+
+      {/* Bottom controls: Gallery · Shutter · Done */}
+      <div className="absolute bottom-0 left-0 right-0 z-10 flex items-center justify-between px-8 pb-12">
+        {/* Gallery */}
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          className="rounded-full bg-black/40 p-3.5 text-white backdrop-blur-sm"
+          aria-label="Upload from gallery"
+        >
+          <Images className="h-6 w-6" />
+        </button>
+
+        {/* Shutter */}
+        {!cameraError && (
+          <button
+            onClick={handleCapture}
+            disabled={!cameraReady}
+            aria-label="Take photo"
+            className="h-16 w-16 rounded-full border-4 border-white bg-white/90 transition-transform active:scale-95 disabled:opacity-40"
+          />
+        )}
+
+        {/* Done / spacer */}
+        {photos.length > 0 ? (
+          <button
+            onClick={handleProcessNow}
+            className="flex flex-col items-center gap-0.5 rounded-2xl bg-cubby-lime px-4 py-2.5 text-cubby-green"
+          >
+            <Check className="h-5 w-5" />
+            <span className="text-xs font-black">Done</span>
+          </button>
+        ) : (
+          <div className="w-14" />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ReviewItemCard subcomponent
+// ---------------------------------------------------------------------------
+
+function ReviewItemCard({
+  item,
+  index,
+  onToggle,
+  onFieldChange,
+  onRemove,
+}: {
+  item: DetectedItem;
+  index: number;
+  onToggle: (i: number) => void;
+  onFieldChange: (i: number, field: string, value: unknown) => void;
+  onRemove: (i: number) => void;
+}) {
+  return (
+    <div className={cn("px-4 py-3 space-y-2", !item.included && "opacity-50")}>
+      {/* Header: checkbox + name + delete */}
+      <div className="flex items-start gap-3">
+        <button
+          onClick={() => onToggle(index)}
+          className={cn(
+            "w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 mt-0.5 transition-colors",
+            item.included ? "bg-cubby-green border-cubby-green" : "border-cubby-taupe/50"
+          )}
+        >
+          {item.included && <Check className="w-3 h-3 text-white" strokeWidth={3} />}
+        </button>
+        <div className="flex-1 min-w-0">
+          <p className="font-black text-sm text-cubby-charcoal leading-tight">{item.productName}</p>
+          {item.brand && (
+            <p className="text-xs text-cubby-taupe">{item.brand}</p>
+          )}
+        </div>
+        <button
+          onClick={() => onRemove(index)}
+          className="text-cubby-taupe/60 hover:text-cubby-urgent transition-colors"
+        >
+          <Trash2 className="w-4 h-4" />
+        </button>
+      </div>
+
+      {item.included && (
+        <>
+          {/* Category + Quantity */}
+          <div className="flex items-center justify-between gap-3 pl-8">
+            <span className="bg-cubby-stone rounded-full px-3 py-1 text-xs font-black text-cubby-taupe">
+              {item.category}
+            </span>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => onFieldChange(index, "quantity", Math.max(0.5, item.quantity - 1))}
+                className="w-7 h-7 rounded-full bg-cubby-stone flex items-center justify-center text-cubby-charcoal"
+              >
+                <Minus className="w-3.5 h-3.5" />
+              </button>
+              <span className="w-8 text-center text-sm font-black text-cubby-charcoal">
+                {item.quantity % 1 === 0 ? item.quantity : item.quantity.toFixed(1)}
+              </span>
+              <button
+                onClick={() => onFieldChange(index, "quantity", item.quantity + 1)}
+                className="w-7 h-7 rounded-full bg-cubby-stone flex items-center justify-center text-cubby-charcoal"
+              >
+                <Plus className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+
+          {/* Storage location chips */}
+          <div className="flex gap-1.5 flex-wrap pl-8">
+            {STORAGE_OPTIONS.map((opt) => (
+              <button
+                key={opt.id}
+                onClick={() => onFieldChange(index, "storageLocation", opt.id)}
+                className={cn(
+                  "text-xs px-2.5 py-1 rounded-full font-black border transition-all",
+                  item.storageLocation === opt.id
+                    ? "bg-cubby-green border-cubby-green text-white"
+                    : "border-cubby-stone text-cubby-taupe bg-cubby-stone"
+                )}
+              >
+                {opt.emoji} {opt.label}
+              </button>
             ))}
           </div>
-          <div className="w-10 h-10 border-4 border-cubby-green border-t-transparent rounded-full animate-spin mx-auto" />
-          <div>
-            <p className="font-black text-cubby-charcoal">{processingStatus || "Scanning your kitchen…"}</p>
-            <p className="text-cubby-taupe text-sm mt-1">This takes about 10–15 seconds</p>
-          </div>
-        </div>
-      )}
-
-      {/* ── Review phase ── */}
-      {phase === "review" && (
-        <div className="px-4 pb-32 space-y-3">
-          <p className="text-xs font-black text-cubby-taupe uppercase tracking-wider pt-1">
-            Found {items.length} items across {photos.length} photo{photos.length !== 1 ? "s" : ""} — {selectedCount} selected
-          </p>
-
-          {sectionConfig.map(({ key, label, description, color }) => {
-            const group = grouped[key];
-            if (group.length === 0) return null;
-            const expanded = expandedSections[key];
-
-            return (
-              <div key={key} className="bg-cubby-cream rounded-card overflow-hidden">
-                <button
-                  onClick={() => toggleSection(key)}
-                  className="w-full px-4 py-3.5 flex items-center justify-between"
-                >
-                  <div>
-                    <span className={cn("font-black text-sm", color)}>{label}</span>
-                    <span className="text-cubby-taupe text-xs ml-2">({group.length})</span>
-                    <p className="text-xs text-cubby-taupe mt-0.5">{description}</p>
-                  </div>
-                  {expanded
-                    ? <ChevronUp className="w-4 h-4 text-cubby-taupe" />
-                    : <ChevronDown className="w-4 h-4 text-cubby-taupe" />}
-                </button>
-
-                {expanded && (
-                  <div className="divide-y divide-cubby-stone">
-                    {group.map((item) => (
-                      <div key={item.id} className={cn("px-4 py-3 space-y-2", !item.selected && "opacity-50")}>
-                        <div className="flex items-start gap-3">
-                          <button
-                            onClick={() => updateItem(item.id, { selected: !item.selected })}
-                            className={cn(
-                              "w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 mt-0.5 transition-colors",
-                              item.selected ? "bg-cubby-green border-cubby-green" : "border-cubby-taupe/50"
-                            )}
-                          >
-                            {item.selected && <Check className="w-3 h-3 text-white" strokeWidth={3} />}
-                          </button>
-                          <span className="flex-1 font-black text-sm text-cubby-charcoal leading-tight">{item.name}</span>
-                          <button
-                            onClick={() => removeItem(item.id)}
-                            className="text-cubby-taupe/60 hover:text-cubby-urgent transition-colors"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-
-                        {/* Storage location chips */}
-                        <div className="flex gap-1.5 flex-wrap pl-8">
-                          {STORAGE_OPTIONS.map((opt) => (
-                            <button
-                              key={opt.id}
-                              onClick={() => updateItem(item.id, { location: opt.id })}
-                              className={cn(
-                                "text-xs px-2.5 py-1 rounded-full font-black border transition-all",
-                                item.location === opt.id
-                                  ? "bg-cubby-green border-cubby-green text-white"
-                                  : "border-cubby-stone text-cubby-taupe bg-cubby-stone"
-                              )}
-                            >
-                              {opt.emoji} {opt.label}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-
-          {/* Sticky save bar */}
-          <div className="fixed bottom-0 left-0 right-0 bg-cubby-stone/95 backdrop-blur-sm px-4 pb-6 pt-3 border-t border-black/5">
-            <button
-              onClick={handleSave}
-              disabled={selectedCount === 0}
-              className={cn(
-                "w-full bg-cubby-green text-white py-4 rounded-2xl font-black text-base",
-                "flex items-center justify-center gap-2 active:scale-[0.97] transition-all",
-                selectedCount === 0 && "opacity-40"
-              )}
-            >
-              <Check className="w-5 h-5" strokeWidth={3} />
-              Add {selectedCount} item{selectedCount !== 1 ? "s" : ""} to Cubby
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Saving overlay */}
-      {phase === "saving" && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center">
-          <div className="bg-cubby-cream rounded-card px-8 py-6 text-center space-y-3">
-            <div className="w-10 h-10 border-4 border-cubby-green border-t-transparent rounded-full animate-spin mx-auto" />
-            <p className="font-black text-cubby-charcoal">Saving items…</p>
-          </div>
-        </div>
+        </>
       )}
     </div>
   );

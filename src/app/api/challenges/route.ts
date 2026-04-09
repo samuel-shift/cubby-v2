@@ -6,18 +6,15 @@
  */
 
 import { NextResponse } from "next/server";
-import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { getRequiredUserId } from "@/lib/auth-helpers";
 
 export async function GET() {
-  const session = await auth().catch(() => null);
-  if (!session?.user?.id) {
-    return NextResponse.json([], { status: 200 }); // Return empty for unauthenticated
-  }
-
   try {
+    const userId = await getRequiredUserId();
+
     const challenges = await prisma.userChallenge.findMany({
-      where: { userId: session.user.id },
+      where: { userId },
       select: {
         type: true,
         progress: true,

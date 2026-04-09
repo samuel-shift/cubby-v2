@@ -2,13 +2,8 @@
  * GET /api/shopping/suggestions
  */
 import { NextResponse } from "next/server";
-import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-
-async function getUserId(): Promise<string | null> {
-  const session = await auth().catch(() => null);
-  return session?.user?.id ?? null;
-}
+import { getRequiredUserId } from "@/lib/auth-helpers";
 
 interface Suggestion {
   name: string;
@@ -23,8 +18,7 @@ const CATEGORY_EMOJI: Record<string, string> = {
 };
 
 export async function GET() {
-  const userId = await getUserId();
-  if (!userId) return NextResponse.json([]);
+  const userId = await getRequiredUserId();
 
   try {
     const suggestions: Suggestion[] = [];

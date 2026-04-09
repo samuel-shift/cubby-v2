@@ -2,17 +2,11 @@
  * GET /api/inventory/stats
  */
 import { NextResponse } from "next/server";
-import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-
-async function getUserId(): Promise<string | null> {
-  const session = await auth().catch(() => null);
-  return session?.user?.id ?? null;
-}
+import { getRequiredUserId } from "@/lib/auth-helpers";
 
 export async function GET() {
-  const userId = await getUserId();
-  if (!userId) return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
+  const userId = await getRequiredUserId();
 
   const [eatenCount, thrownOutCount, activeCount] = await Promise.all([
     prisma.inventoryItem.count({ where: { userId, status: "EATEN" } }),

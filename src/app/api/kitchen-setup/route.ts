@@ -3,18 +3,12 @@
  * GET  /api/kitchen-setup — returns whether kitchen setup is complete
  */
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-
-async function getUserId(): Promise<string | null> {
-  const session = await auth().catch(() => null);
-  return session?.user?.id ?? null;
-}
+import { getRequiredUserId } from "@/lib/auth-helpers";
 
 export async function POST(req: NextRequest) {
   try {
-    const userId = await getUserId();
-    if (!userId) return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
+    const userId = await getRequiredUserId();
 
     const body = await req.json();
 
@@ -34,8 +28,7 @@ export async function POST(req: NextRequest) {
 
 export async function GET() {
   try {
-    const userId = await getUserId();
-    if (!userId) return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
+    const userId = await getRequiredUserId();
 
     const user = await prisma.user.findUnique({
       where: { id: userId },

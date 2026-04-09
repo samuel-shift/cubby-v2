@@ -13,8 +13,8 @@
  *  - entryMethods: breakdown by how items were logged
  */
 import { NextResponse } from "next/server";
-import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { getRequiredUserId } from "@/lib/auth-helpers";
 
 // £ value estimates
 const VALUE_PER_ITEM_SAVED = 1.8;
@@ -27,11 +27,7 @@ interface DayBucket {
 }
 
 export async function GET() {
-  const session = await auth();
-  if (!session?.user?.id)
-    return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
-
-  const userId = session.user.id;
+  const userId = await getRequiredUserId();
 
   const [
     user,
