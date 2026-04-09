@@ -1,16 +1,5 @@
 "use client";
 
-/**
- * Onboarding — 6-Step Flow with AnimatePresence slide transitions
- *
- * Step 1: Login (email magic link)
- * Step 2: Name ("Hello, Chef!")
- * Step 3: Notifications (range slider 0-3)
- * Step 4: Dietary needs + allergens (merged, search-as-you-type + chips)
- * Step 5: Motivation (icon buttons)
- * Step 6: Welcome / finish CTA
- */
-
 import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { signIn } from "next-auth/react";
@@ -20,9 +9,7 @@ import { cn } from "@/lib/utils";
 import {
   Leaf, PiggyBank, Clock, Heart, Target, UtensilsCrossed, Mail, Check
 } from "lucide-react";
-import { QUICK_STOCK_ITEMS, type QuickStockItem } from "@/lib/grocery-data";
-
-// ── SSO Provider Buttons ─────────────────────────────────────────────────────
+import { QUICK_STOCK_ITEMS } from "@/lib/grocery-data";
 
 function GoogleIcon() {
   return (
@@ -34,7 +21,6 @@ function GoogleIcon() {
     </svg>
   );
 }
-
 
 const TOTAL_STEPS = 7;
 
@@ -59,23 +45,17 @@ const MOTIVATIONS = [
 const NOTIFICATION_LABELS = ["Never", "Once a week", "A few times", "Daily"];
 
 const slideVariants = {
-  enter: (dir: number) => ({
-    x: dir > 0 ? "100%" : "-100%",
-    opacity: 0,
-  }),
+  enter: (dir: number) => ({ x: dir > 0 ? "100%" : "-100%", opacity: 0 }),
   center: { x: 0, opacity: 1 },
-  exit: (dir: number) => ({
-    x: dir > 0 ? "-100%" : "100%",
-    opacity: 0,
-  }),
+  exit: (dir: number) => ({ x: dir > 0 ? "-100%" : "100%", opacity: 0 }),
 };
 
 export function OnboardingClient() {
   const [step, setStep] = useState(1);
   const [dir, setDir] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [loginError, setLoginError] = useState<string | null>(null);
 
-  // Form state
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [notifFreq, setNotifFreq] = useState(1);
@@ -84,27 +64,12 @@ export function OnboardingClient() {
   const [dietarySearch, setDietarySearch] = useState("");
   const [motivations, setMotivations] = useState<string[]>([]);
   const [quickStock, setQuickStock] = useState<Set<number>>(new Set());
-  const [stockLoading, setStockLoading] = useState(false);
 
-  const goNext = () => {
-    setDir(1);
-    setStep((s) => Math.min(s + 1, TOTAL_STEPS));
-  };
-
-  const goBack = () => {
-    setDir(-1);
-    setStep((s) => Math.max(s - 1, 1));
-  };
+  const goNext = () => { setDir(1); setStep((s) => Math.min(s + 1, TOTAL_STEPS)); };
+  const goBack = () => { setDir(-1); setStep((s) => Math.max(s - 1, 1)); };
 
   const toggleItem = (arr: string[], setArr: (v: string[]) => void, val: string) => {
     setArr(arr.includes(val) ? arr.filter((x) => x !== val) : [...arr, val]);
-  };
-
-  const handleEmailSubmit = async () => {
-    setLoading(true);
-    await signIn("resend", { email, redirect: false, callbackUrl: "/onboarding?step=2" });
-    setLoading(false);
-    goNext();
   };
 
   const toggleQuickStock = (index: number) => {
@@ -116,6 +81,28 @@ export function OnboardingClient() {
     });
   };
 
+  const handleEmailSubmit = async () => {
+    if (!email.includes("@")) return;
+    setLoading(true);
+    setLoginError(null);
+    try {
+      const result = await signIn("email-no-verify", {
+        email,
+        redirect: false,
+        callbackUrl: "/onboarding",
+      });
+      if (result?.error) {
+        setLoginError("Something went wrong. Please try again.");
+      } else {
+        goNext();
+      }
+    } catch {
+      setLoginError("Something went wrong. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleFinish = async () => {
     setLoading(true);
     await fetch("/api/user/onboarding", {
@@ -124,7 +111,6 @@ export function OnboardingClient() {
       body: JSON.stringify({ name, notificationFrequency: notifFreq, dietaryNeeds: selectedDietary, allergens: selectedAllergens, motivations }),
     });
 
-    // If user selected Quick Stock items, add them to inventory
     if (quickStock.size > 0) {
       const selectedItems = Array.from(quickStock).map((i) => QUICK_STOCK_ITEMS[i]);
       await Promise.allSettled(
@@ -153,7 +139,6 @@ export function OnboardingClient() {
 
   return (
     <div className="min-h-screen flex flex-col bg-cubby-stone overflow-hidden">
-      {/* Progress dots (show for steps 2-6, hide on login + welcome) */}
       {step > 1 && step < TOTAL_STEPS && (
         <div className="flex items-center justify-center gap-2 pt-6">
           {Array.from({ length: TOTAL_STEPS - 2 }, (_, i) => (
@@ -168,7 +153,6 @@ export function OnboardingClient() {
         </div>
       )}
 
-      {/* Step content */}
       <div className="flex-1 relative overflow-hidden">
         <AnimatePresence custom={dir} mode="wait">
           <motion.div
@@ -190,41 +174,55 @@ export function OnboardingClient() {
                   <p className="text-cubby-taupe text-sm">Save food, save money. Sign in to get started.</p>
                 </div>
 
-                {/* SSO Buttons */}
-                <div className="space-y-3">
-                  <button
-                    onClick={() => signIn("google", { callbackUrl: "/onboarding?step=2" })}
-                    className="w-full flex items-center justify-center gap-3 bg-white border border-black/10 text-cubby-charcoal font-black rounded-2xl py-3.5 shadow-sm active:scale-[0.98] transition-all"
-                  >
-                    <GoogleIcon />
-                    Continue with Google
-                  </button>
-
+                {/* Coming soon SSO */}
+                <div className="space-y-3 opacity-40 pointer-events-none select-none">
+                  <div className="w-full flex items-center justify-between gap-3 bg-white border border-black/10 text-cubby-charcoal font-black rounded-2xl py-3.5 px-4 shadow-sm">
+                    <div className="flex items-center gap-3">
+                      <GoogleIcon />
+                      <span>Continue with Google</span>
+                    </div>
+                    <span className="text-xs font-semibold text-cubby-taupe bg-black/5 px-2 py-0.5 rounded-full">Coming soon</span>
+                  </div>
                 </div>
 
                 {/* Divider */}
                 <div className="flex items-center gap-3">
                   <div className="flex-1 h-px bg-black/10" />
-                  <span className="text-xs text-cubby-taupe font-semibold">or use email</span>
+                  <span className="text-xs text-cubby-taupe font-semibold">sign in with email</span>
                   <div className="flex-1 h-px bg-black/10" />
                 </div>
 
-                {/* Magic link email */}
+                {/* Email login — no verification */}
                 <div className="space-y-3">
                   <Input
                     type="email"
                     placeholder="you@example.com"
                     value={email}
-                    onChange={(e) => setEmail(e.target.value)}
+                    onChange={(e) => { setEmail(e.target.value); setLoginError(null); }}
+                    onKeyDown={(e) => e.key === "Enter" && handleEmailSubmit()}
                   />
+                  {loginError && (
+                    <p className="text-sm text-red-500 font-semibold text-center">{loginError}</p>
+                  )}
                   <button
                     onClick={handleEmailSubmit}
                     disabled={loading || !email.includes("@")}
-                    className="w-full flex items-center justify-center gap-2 bg-cubby-cream border border-black/10 text-cubby-charcoal font-black rounded-2xl py-3.5 disabled:opacity-50 active:scale-[0.98] transition-all"
+                    className="w-full flex items-center justify-center gap-2 bg-cubby-green text-white font-black rounded-2xl py-3.5 disabled:opacity-50 active:scale-[0.98] transition-all"
                   >
                     <Mail className="w-4 h-4" />
-                    {loading ? "Sending…" : "Send magic link"}
+                    {loading ? "Signing in…" : "Continue with email"}
                   </button>
+
+                  {/* Coming soon magic link */}
+                  <div className="opacity-40 pointer-events-none select-none">
+                    <div className="w-full flex items-center justify-between gap-3 bg-cubby-cream border border-black/10 text-cubby-charcoal font-black rounded-2xl py-3.5 px-4">
+                      <div className="flex items-center gap-2">
+                        <Mail className="w-4 h-4" />
+                        <span>Send magic link</span>
+                      </div>
+                      <span className="text-xs font-semibold text-cubby-taupe bg-black/5 px-2 py-0.5 rounded-full">Coming soon</span>
+                    </div>
+                  </div>
                 </div>
 
                 <p className="text-center text-xs text-cubby-taupe">
@@ -261,10 +259,7 @@ export function OnboardingClient() {
                 </div>
                 <div className="space-y-4">
                   <input
-                    type="range"
-                    min={0}
-                    max={3}
-                    step={1}
+                    type="range" min={0} max={3} step={1}
                     value={notifFreq}
                     onChange={(e) => setNotifFreq(Number(e.target.value))}
                     className="w-full accent-cubby-green"
@@ -352,9 +347,8 @@ export function OnboardingClient() {
                 <div className="text-center space-y-1">
                   <div className="text-6xl mb-2">🧊</div>
                   <h1 className="text-page-title text-cubby-charcoal">Stock your Cubby</h1>
-                  <p className="text-cubby-taupe text-sm">Tap everything you have at home right now. We&apos;ll add it to your kitchen.</p>
+                  <p className="text-cubby-taupe text-sm">Tap everything you have at home right now.</p>
                 </div>
-
                 <div className="flex flex-wrap gap-2 overflow-y-auto flex-1 pb-2 content-start">
                   {QUICK_STOCK_ITEMS.map((item, i) => {
                     const selected = quickStock.has(i);
@@ -376,7 +370,6 @@ export function OnboardingClient() {
                     );
                   })}
                 </div>
-
                 {quickStock.size > 0 && (
                   <p className="text-center text-sm font-black text-cubby-green">
                     {quickStock.size} item{quickStock.size !== 1 ? "s" : ""} selected
@@ -413,17 +406,12 @@ export function OnboardingClient() {
         </AnimatePresence>
       </div>
 
-      {/* Nav buttons (skip step 1 — has its own CTA, skip step 7 — has own CTAs) */}
       {step > 1 && step < TOTAL_STEPS && (
         <div className="px-6 pb-8 flex items-center justify-between gap-4">
           <button onClick={goBack} className="text-sm font-semibold text-cubby-taupe">
             ← Back
           </button>
-          <Button
-            onClick={goNext}
-            loading={loading}
-            className="flex-1"
-          >
+          <Button onClick={goNext} loading={loading} className="flex-1">
             {step === 6
               ? quickStock.size > 0
                 ? `Add ${quickStock.size} item${quickStock.size !== 1 ? "s" : ""} →`
