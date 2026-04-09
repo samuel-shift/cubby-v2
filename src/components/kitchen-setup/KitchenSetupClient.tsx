@@ -8,7 +8,6 @@ import { useRouter } from "next/navigation";
 
 export function KitchenSetupClient() {
   const router = useRouter();
-  // All items pre-selected by default
   const [selected, setSelected] = useState<Set<number>>(
     new Set(QUICK_STOCK_ITEMS.map((_, i) => i))
   );
@@ -113,7 +112,6 @@ export function KitchenSetupClient() {
 
   return (
     <div className="min-h-screen bg-cubby-stone pb-32">
-      {/* Header */}
       <div className="px-4 pt-14 pb-3 sticky top-0 z-10 bg-cubby-stone">
         <div className="flex items-center justify-between gap-3 mb-3">
           <div className="flex items-center gap-3">
@@ -130,19 +128,18 @@ export function KitchenSetupClient() {
           </div>
           <button
             onClick={toggleAll}
-            className={cn(
-              "flex-shrink-0 px-3 py-1.5 rounded-xl text-xs font-black border transition-colors active:scale-95",
-              allSelected
-                ? "bg-transparent text-cubby-taupe border-black/10"
-                : "bg-cubby-green text-white border-transparent"
-            )}
+            className="flex-shrink-0 px-3 py-1.5 rounded-xl text-xs font-black border transition-colors active:scale-95"
+            style={{
+              background: allSelected ? "transparent" : "var(--cubby-green, #4a7c59)",
+              color: allSelected ? "var(--cubby-taupe, #8a8a7a)" : "white",
+              borderColor: allSelected ? "rgba(0,0,0,0.1)" : "transparent",
+            }}
           >
             {allSelected ? "Deselect all" : "Select all"}
           </button>
         </div>
       </div>
 
-      {/* Product grid */}
       <div className="px-4 pb-52">
         <div className="flex flex-wrap gap-2">
           {QUICK_STOCK_ITEMS.map((item, i) => {
@@ -169,7 +166,6 @@ export function KitchenSetupClient() {
         </div>
       </div>
 
-      {/* Fixed bottom bar — sits above the 80px bottom nav */}
       <div className="fixed bottom-20 left-0 right-0 bg-cubby-stone border-t border-black/5 px-4 pt-4 pb-4">
         {error && (
           <p className="text-center text-sm font-black text-red-500 mb-3">{error}</p>
