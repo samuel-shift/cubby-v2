@@ -12,17 +12,21 @@
  * - Search
  */
 import { auth } from "@/auth";
+import { getSession } from "@/lib/session";
 import { PantryClient } from "@/components/pantry/PantryClient";
 import { prisma } from "@/lib/prisma";
 
 export default async function PantryPage() {
-  const session = await auth().catch(() => null);
-  if (!session?.user?.id) return <PantryClient initialItems={[]} />;
+  const nextAuth = await auth().catch(() => null);
+  const custom = await getSession();
+  const userId = nextAuth?.user?.id ?? custom?.userId ?? null;
+
+  if (!userId) return <PantryClient initialItems={[]} />;
 
   // Fetch active items, ordered by expiry date ascending
   const items = await prisma.inventoryItem.findMany({
     where: {
-      userId: session.user.id,
+      userId,
       status: "ACTIVE",
     },
     orderBy: {
