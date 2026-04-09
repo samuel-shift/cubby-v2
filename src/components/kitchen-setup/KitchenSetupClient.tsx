@@ -12,6 +12,8 @@ export function KitchenSetupClient() {
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [loading, setLoading] = useState(false);
   const [done, setDone] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
   const toggle = useCallback((idx: number) => {
     setSelected((prev) => {
       const next = new Set(prev);
@@ -20,12 +22,16 @@ export function KitchenSetupClient() {
       return next;
     });
   }, []);
+
   async function handleSubmit() {
     if (selected.size === 0) return;
     setLoading(true);
+    setError(null);
+
     try {
       const items = Array.from(selected).map((i) => QUICK_STOCK_ITEMS[i]);
-      await Promise.allSettled(
+
+      const results = await Promise.allSettled(
         items.map((item) =>
           fetch("/api/inventory", {
             method: "POST",
@@ -35,11 +41,30 @@ export function KitchenSetupClient() {
               category: item.category,
               location: item.location,
               quantity: 1,
-              unit: "item",
+              entryMethod: "MANUAL",
             }),
+          }).then(async (res) => {
+            if (!res.ok) {
+              const body = await res.text();
+              throw new Error(`${res.status}: ${body}`);
+            }
+            return res.json();
           })
         )
       );
+
+      const failures = results.filter((r) => r.status === "rejected");
+      if (failures.length > 0) {
+        console.error("Some items failed to save:", failures);
+      }
+
+      const successes = results.filter((r) => r.status === "fulfilled").length;
+      if (successes === 0) {
+        setError("Couldn't save items — please try again.");
+        return;
+      }
+
+      // Mark kitchen setup challenge as complete
       try {
         await fetch("/api/kitchen-setup", {
           method: "POST",
@@ -49,13 +74,16 @@ export function KitchenSetupClient() {
       } catch {
         // non-critical
       }
+
       setDone(true);
-    } catch {
-      // silent
+    } catch (err) {
+      console.error("Kitchen setup submit error:", err);
+      setError("Something went wrong — please try again.");
     } finally {
       setLoading(false);
     }
   }
+
   if (done) {
     return (
       <div className="min-h-screen bg-cubby-stone flex flex-col items-center justify-center px-6 text-center space-y-6">
@@ -67,14 +95,15 @@ export function KitchenSetupClient() {
           </p>
         </div>
         <button
-          onClick={() => router.push("/")}
+          onClick={() => router.push("/pantry")}
           className="bg-cubby-green text-white px-8 py-3.5 rounded-2xl font-black text-sm active:scale-95 transition-transform"
         >
-          Back to home
+          View my kitchen
         </button>
       </div>
     );
   }
+
   return (
     <div className="min-h-screen bg-cubby-stone">
       {/* Header */}
@@ -121,7 +150,10 @@ export function KitchenSetupClient() {
       </div>
       {/* Fixed bottom bar — bottom-20 clears the 80px app nav bar */}
       <div className="fixed bottom-20 left-0 right-0 bg-cubby-stone border-t border-black/5 px-4 pt-4 pb-4">
-        {selected.size > 0 && (
+        {error && (
+          <p className="text-center text-sm font-black text-red-500 mb-3">{error}</p>
+        )}
+        {selected.size > 0 && !error && (
           <p className="text-center text-sm font-black text-cubby-green mb-3">
             {selected.size} item{selected.size !== 1 ? "s" : ""} selected
           </p>
