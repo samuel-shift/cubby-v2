@@ -1,7 +1,7 @@
 "use client";
-
 import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
+import { signIn } from "next-auth/react";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { cn } from "@/lib/utils";
@@ -22,16 +22,13 @@ function GoogleIcon() {
 }
 
 const TOTAL_STEPS = 7;
-
 const DIETARY_OPTIONS = [
   "Vegan", "Vegetarian", "Pescatarian", "Gluten-free", "Dairy-free",
   "Nut-free", "Egg-free", "Halal", "Kosher", "Low FODMAP",
 ];
-
 const ALLERGENS = [
   "Peanuts", "Tree nuts", "Milk", "Eggs", "Wheat", "Soy", "Fish", "Shellfish",
 ];
-
 const MOTIVATIONS = [
   { id: "save-money", label: "Save money", icon: PiggyBank },
   { id: "reduce-waste", label: "Reduce waste", icon: Leaf },
@@ -40,9 +37,7 @@ const MOTIVATIONS = [
   { id: "set-goals", label: "Hit goals", icon: Target },
   { id: "cook-more", label: "Cook more", icon: UtensilsCrossed },
 ];
-
 const NOTIFICATION_LABELS = ["Never", "Once a week", "A few times", "Daily"];
-
 const slideVariants = {
   enter: (dir: number) => ({ x: dir > 0 ? "100%" : "-100%", opacity: 0 }),
   center: { x: 0, opacity: 1 },
@@ -54,7 +49,6 @@ export function OnboardingClient() {
   const [dir, setDir] = useState(1);
   const [loading, setLoading] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
-
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [notifFreq, setNotifFreq] = useState(1);
@@ -85,12 +79,11 @@ export function OnboardingClient() {
     setLoading(true);
     setLoginError(null);
     try {
-      const res = await fetch("/api/auth/email-login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email }),
+      const result = await signIn("email-no-verify", {
+        email,
+        redirect: false,
       });
-      if (!res.ok) {
+      if (result?.error) {
         setLoginError("Something went wrong. Please try again.");
       } else {
         goNext();
@@ -109,7 +102,6 @@ export function OnboardingClient() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name, notificationFrequency: notifFreq, dietaryNeeds: selectedDietary, allergens: selectedAllergens, motivations }),
     });
-
     if (quickStock.size > 0) {
       const selectedItems = Array.from(quickStock).map((i) => QUICK_STOCK_ITEMS[i]);
       await Promise.allSettled(
@@ -128,7 +120,6 @@ export function OnboardingClient() {
         )
       );
     }
-
     window.location.href = "/";
   };
 
@@ -172,7 +163,6 @@ export function OnboardingClient() {
                   <h1 className="text-page-title text-cubby-charcoal">Welcome to Cubby</h1>
                   <p className="text-cubby-taupe text-sm">Save food, save money. Sign in to get started.</p>
                 </div>
-
                 {/* Coming soon SSO */}
                 <div className="space-y-3 opacity-40 pointer-events-none select-none">
                   <div className="w-full flex items-center justify-between gap-3 bg-white border border-black/10 text-cubby-charcoal font-black rounded-2xl py-3.5 px-4 shadow-sm">
@@ -183,14 +173,12 @@ export function OnboardingClient() {
                     <span className="text-xs font-semibold text-cubby-taupe bg-black/5 px-2 py-0.5 rounded-full">Coming soon</span>
                   </div>
                 </div>
-
                 {/* Divider */}
                 <div className="flex items-center gap-3">
                   <div className="flex-1 h-px bg-black/10" />
                   <span className="text-xs text-cubby-taupe font-semibold">sign in with email</span>
                   <div className="flex-1 h-px bg-black/10" />
                 </div>
-
                 {/* Email login — no verification */}
                 <div className="space-y-3">
                   <Input
@@ -211,7 +199,6 @@ export function OnboardingClient() {
                     <Mail className="w-4 h-4" />
                     {loading ? "Signing in…" : "Continue with email"}
                   </button>
-
                   {/* Coming soon magic link */}
                   <div className="opacity-40 pointer-events-none select-none">
                     <div className="w-full flex items-center justify-between gap-3 bg-cubby-cream border border-black/10 text-cubby-charcoal font-black rounded-2xl py-3.5 px-4">
@@ -223,7 +210,6 @@ export function OnboardingClient() {
                     </div>
                   </div>
                 </div>
-
                 <p className="text-center text-xs text-cubby-taupe">
                   By continuing you agree to our Terms & Privacy Policy.
                 </p>
