@@ -1,9 +1,6 @@
-/**
- * GET  /api/inventory — list user's active inventory items
- * POST /api/inventory — create a new inventory item
- */
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
+import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 
@@ -21,12 +18,19 @@ const CreateItemSchema = z.object({
   ocrRawText: z.string().optional(),
 });
 
+async function getUserId(): Promise<string | null> {
+  const session = await auth().catch(() => null);
+  if (session?.user?.id) return session.user.id;
+  const custom = await getSession();
+  return custom?.userId ?? null;
+}
+
 export async function GET() {
-  const session = await auth();
-  if (!session?.user?.id) return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
+  const userId = await getUserId();
+  if (!userId) return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
 
   const items = await prisma.inventoryItem.findMany({
-    where: { userId: session.user.id, status: "ACTIVE" },
+    where: { userId, status: "ACTIVE" },
     orderBy: { expiryDate: "asc" },
   });
 
@@ -34,8 +38,8 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const session = await auth();
-  if (!session?.user?.id) return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
+  const userId = await getUserId();
+  if (!userId) return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
 
   const body = await req.json();
   const parsed = CreateItemSchema.safeParse(body);
@@ -47,7 +51,7 @@ export async function POST(req: NextRequest) {
   const item = await prisma.inventoryItem.create({
     data: {
       ...parsed.data,
-      userId: session.user.id,
+      userId,
       expiryDate: parsed.data.expiryDate ? new Date(parsed.data.expiryDate) : null,
       purchaseDate: parsed.data.purchaseDate ? new Date(parsed.data.purchaseDate) : null,
     },
