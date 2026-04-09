@@ -115,7 +115,7 @@ Rules:
     async start(controller) {
       try {
         const anthropicStream = anthropic.messages.stream({
-          model: "claude-3-5-haiku-latest",
+          model: "claude-sonnet-4-6",
           max_tokens: 4096,
           messages: [{ role: "user", content: prompt }],
         });

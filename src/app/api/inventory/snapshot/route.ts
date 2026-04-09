@@ -50,7 +50,7 @@ const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
 });
 
-const CLAUDE_MODEL = process.env.ANTHROPIC_MODEL || "claude-3-5-sonnet-latest";
+const CLAUDE_MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-6";
 
 export async function POST(req: NextRequest) {
   await getRequiredUserId(); // ensure user exists (real or demo)

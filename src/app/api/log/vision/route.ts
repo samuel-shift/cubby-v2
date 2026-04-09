@@ -36,10 +36,10 @@ Return ONLY valid JSON, no explanation: {items: [{name, quantity, unit, category
 // Use faster haiku model for snapshot (speed > accuracy for inventory scan)
 // Use opus for receipt (accuracy critical for line-item parsing)
 const MODEL_MAP: Record<string, string> = {
-  receipt:  "claude-3-5-sonnet-latest",
-  snapshot: "claude-3-5-haiku-latest",
-  meal:     "claude-3-5-haiku-latest",
-  waste:    "claude-3-5-haiku-latest",
+  receipt:  "claude-sonnet-4-6",
+  snapshot: "claude-sonnet-4-6",
+  meal:     "claude-sonnet-4-6",
+  waste:    "claude-sonnet-4-6",
 };
 
 export async function POST(req: NextRequest) {
@@ -61,7 +61,7 @@ export async function POST(req: NextRequest) {
     data: imageBase64,
   };
 
-  const model = MODEL_MAP[entryType] ?? "claude-3-5-haiku-latest";
+  const model = MODEL_MAP[entryType] ?? "claude-sonnet-4-6";
 
   const response = await anthropic.messages.create({
     model,
