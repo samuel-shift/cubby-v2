@@ -1,18 +1,23 @@
 "use client";
+
 import { useState, useCallback } from "react";
 import { Check, ArrowLeft, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { QUICK_STOCK_ITEMS } from "@/lib/grocery-data";
 import { useRouter } from "next/navigation";
-/**
- * KitchenSetupClient — "Complete Your Kitchen" one-time challenge
- */
+
 export function KitchenSetupClient() {
   const router = useRouter();
-  const [selected, setSelected] = useState<Set<number>>(new Set());
+  // All items pre-selected by default
+  const [selected, setSelected] = useState<Set<number>>(
+    new Set(QUICK_STOCK_ITEMS.map((_, i) => i))
+  );
   const [loading, setLoading] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [savedCount, setSavedCount] = useState(0);
+
+  const allSelected = selected.size === QUICK_STOCK_ITEMS.length;
 
   const toggle = useCallback((idx: number) => {
     setSelected((prev) => {
@@ -22,6 +27,14 @@ export function KitchenSetupClient() {
       return next;
     });
   }, []);
+
+  const toggleAll = useCallback(() => {
+    if (allSelected) {
+      setSelected(new Set());
+    } else {
+      setSelected(new Set(QUICK_STOCK_ITEMS.map((_, i) => i)));
+    }
+  }, [allSelected]);
 
   async function handleSubmit() {
     if (selected.size === 0) return;
@@ -43,28 +56,22 @@ export function KitchenSetupClient() {
               quantity: 1,
               entryMethod: "MANUAL",
             }),
-          }).then(async (res) => {
-            if (!res.ok) {
-              const body = await res.text();
-              throw new Error(`${res.status}: ${body}`);
-            }
-            return res.json();
+          }).then((res) => {
+            if (!res.ok) throw new Error(`Failed to add ${item.name}`);
+            return res;
           })
         )
       );
 
-      const failures = results.filter((r) => r.status === "rejected");
-      if (failures.length > 0) {
-        console.error("Some items failed to save:", failures);
-      }
+      const successCount = results.filter((r) => r.status === "fulfilled").length;
 
-      const successes = results.filter((r) => r.status === "fulfilled").length;
-      if (successes === 0) {
-        setError("Couldn't save items — please try again.");
+      if (successCount === 0) {
+        setError("Couldn't save items. Please try again.");
         return;
       }
 
-      // Mark kitchen setup challenge as complete
+      setSavedCount(successCount);
+
       try {
         await fetch("/api/kitchen-setup", {
           method: "POST",
@@ -76,9 +83,8 @@ export function KitchenSetupClient() {
       }
 
       setDone(true);
-    } catch (err) {
-      console.error("Kitchen setup submit error:", err);
-      setError("Something went wrong — please try again.");
+    } catch {
+      setError("Something went wrong. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -91,37 +97,51 @@ export function KitchenSetupClient() {
         <div className="space-y-2">
           <h1 className="text-2xl font-black text-cubby-charcoal">Kitchen stocked!</h1>
           <p className="text-cubby-taupe text-sm">
-            {selected.size} item{selected.size !== 1 ? "s" : ""} added to your kitchen. Nice one!
+            {savedCount} item{savedCount !== 1 ? "s" : ""} added to your kitchen. Nice one!
           </p>
         </div>
         <button
           onClick={() => router.push("/pantry")}
           className="bg-cubby-green text-white px-8 py-3.5 rounded-2xl font-black text-sm active:scale-95 transition-transform"
         >
-          View my kitchen
+          View my pantry
         </button>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-cubby-stone">
+    <div className="min-h-screen bg-cubby-stone pb-32">
       {/* Header */}
       <div className="px-4 pt-14 pb-3 sticky top-0 z-10 bg-cubby-stone">
-        <div className="flex items-center gap-3 mb-3">
-          <button
-            onClick={() => router.back()}
-            className="w-10 h-10 rounded-xl bg-cubby-cream flex items-center justify-center active:scale-95 transition-transform"
-          >
-            <ArrowLeft className="w-5 h-5 text-cubby-charcoal" />
-          </button>
-          <div>
-            <h1 className="font-black text-cubby-charcoal text-xl">Complete Your Kitchen</h1>
-            <p className="text-cubby-taupe text-xs">Tap everything you have at home</p>
+        <div className="flex items-center justify-between gap-3 mb-3">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => router.back()}
+              className="w-10 h-10 rounded-xl bg-cubby-cream flex items-center justify-center active:scale-95 transition-transform"
+            >
+              <ArrowLeft className="w-5 h-5 text-cubby-charcoal" />
+            </button>
+            <div>
+              <h1 className="font-black text-cubby-charcoal text-xl">Stock your Cubby</h1>
+              <p className="text-cubby-taupe text-xs">Tap everything you have at home right now.</p>
+            </div>
           </div>
+          <button
+            onClick={toggleAll}
+            className={cn(
+              "flex-shrink-0 px-3 py-1.5 rounded-xl text-xs font-black border transition-colors active:scale-95",
+              allSelected
+                ? "bg-transparent text-cubby-taupe border-black/10"
+                : "bg-cubby-green text-white border-transparent"
+            )}
+          >
+            {allSelected ? "Deselect all" : "Select all"}
+          </button>
         </div>
       </div>
-      {/* Product grid — pb-52 ensures content scrolls clear of the fixed bottom bar + nav */}
+
+      {/* Product grid */}
       <div className="px-4 pb-52">
         <div className="flex flex-wrap gap-2">
           {QUICK_STOCK_ITEMS.map((item, i) => {
@@ -139,7 +159,6 @@ export function KitchenSetupClient() {
               >
                 <span className="text-base">{item.emoji}</span>
                 <span>{item.name}</span>
-                {/* Fixed-size container prevents layout shift when check appears */}
                 <span className="w-3.5 h-3.5 ml-0.5 flex-shrink-0">
                   {isSelected && <Check className="w-3.5 h-3.5" strokeWidth={3} />}
                 </span>
@@ -148,12 +167,13 @@ export function KitchenSetupClient() {
           })}
         </div>
       </div>
-      {/* Fixed bottom bar — bottom-20 clears the 80px app nav bar */}
+
+      {/* Fixed bottom bar — sits above the 80px bottom nav */}
       <div className="fixed bottom-20 left-0 right-0 bg-cubby-stone border-t border-black/5 px-4 pt-4 pb-4">
         {error && (
           <p className="text-center text-sm font-black text-red-500 mb-3">{error}</p>
         )}
-        {selected.size > 0 && !error && (
+        {!error && selected.size > 0 && (
           <p className="text-center text-sm font-black text-cubby-green mb-3">
             {selected.size} item{selected.size !== 1 ? "s" : ""} selected
           </p>
