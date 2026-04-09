@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "prisma db push --accept-data-loss && next build",
     "start": "next start",
     "lint": "next lint",
     "postinstall": "prisma generate",
@@ -13,31 +13,31 @@
     "db:migrate": "prisma migrate dev"
   },
   "dependencies": {
-    "next": "15.5.14",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
+    "@anthropic-ai/sdk": "^0.36.0",
+    "@auth/prisma-adapter": "^2.7.4",
+    "@prisma/client": "^6.0.0",
+    "@supabase/ssr": "^0.5.2",
+    "@supabase/supabase-js": "^2.46.0",
+    "clsx": "^2.1.1",
     "framer-motion": "^11.0.0",
     "lucide-react": "^0.474.0",
-    "clsx": "^2.1.1",
-    "tailwind-merge": "^2.5.4",
-    "@supabase/supabase-js": "^2.46.0",
-    "@supabase/ssr": "^0.5.2",
+    "next": "15.5.14",
     "next-auth": "^5.0.0-beta.25",
-    "@auth/prisma-adapter": "^2.7.4",
-    "@anthropic-ai/sdk": "^0.36.0",
     "prisma": "^6.0.0",
-    "@prisma/client": "^6.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "tailwind-merge": "^2.5.4",
     "zod": "^3.23.8"
   },
   "devDependencies": {
-    "typescript": "^5",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "autoprefixer": "^10.0.1",
     "eslint": "^8",
     "eslint-config-next": "15.5.14",
-    "tailwindcss": "^3.4.1",
     "postcss": "^8",
-    "autoprefixer": "^10.0.1"
+    "tailwindcss": "^3.4.1",
+    "typescript": "^5"
   }
 }
