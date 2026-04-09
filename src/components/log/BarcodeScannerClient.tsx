@@ -96,18 +96,29 @@ export function BarcodeScannerClient() {
       const detector = scannerRef.current?.instance;
       if (video && detector && video.readyState >= 2 && video.videoWidth > 0) {
         try {
-          const barcodes = await detector.detect(video);
-          if (barcodes.length > 0 && !scannedRef.current) {
-            scannedRef.current = true;
-            stopCamera();
-            await lookupBarcode(barcodes[0].rawValue);
-            return;
+          // Use canvas for detection (more reliable than direct video, especially on iOS)
+          const canvas = document.createElement("canvas");
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+          const ctx = canvas.getContext("2d");
+          if (ctx) {
+            ctx.drawImage(video, 0, 0);
+            const barcodes = await detector.detect(canvas);
+            if (barcodes.length > 0 && !scannedRef.current) {
+              scannedRef.current = true;
+              stopCamera();
+              await lookupBarcode(barcodes[0].rawValue);
+              return;
+            }
           }
         } catch {
           // keep scanning
         }
       }
-      rafRef.current = requestAnimationFrame(detect);
+      // Throttle to ~300ms instead of every frame for better performance
+      setTimeout(() => {
+        rafRef.current = requestAnimationFrame(detect);
+      }, 300);
     };
     rafRef.current = requestAnimationFrame(detect);
   }, [stopCamera, lookupBarcode]);
@@ -156,7 +167,10 @@ export function BarcodeScannerClient() {
           // keep scanning
         }
       }
-      rafRef.current = requestAnimationFrame(detect);
+      // Throttle to ~300ms for better performance
+      setTimeout(() => {
+        rafRef.current = requestAnimationFrame(detect);
+      }, 300);
     };
     rafRef.current = requestAnimationFrame(detect);
   }, [stopCamera, lookupBarcode]);

@@ -29,11 +29,8 @@ import Link from "next/link";
 import {
   Camera,
   Check,
-  Trash2,
   Plus,
   RefreshCw,
-  ChevronDown,
-  ChevronUp,
   X,
   Minus,
   Images,
@@ -76,7 +73,6 @@ interface DetectedItem {
 const MAX_PHOTOS = 5;
 const MAX_SIDE_PX = 1024;
 const JPEG_QUALITY = 0.8;
-const CONFIDENCE_THRESHOLD = 0.75;
 
 const PROCESSING_MESSAGES = ["Identifying your food...", "Looking for items...", "Almost there..."];
 
@@ -143,10 +139,6 @@ export function KitchenSnapshotClient() {
   const [errorMessage, setErrorMessage] = useState("");
 
   // Review state
-  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
-    check: true,
-    identified: false,
-  });
 
   // ─── Camera initialisation ────────────────────────────────────────────────
 
@@ -381,12 +373,6 @@ export function KitchenSnapshotClient() {
       }
 
       setItems(detected);
-      // Auto-expand "check these" if there are low-confidence items
-      const hasLowConf = detected.some((i) => i.confidence < CONFIDENCE_THRESHOLD);
-      setExpandedSections({
-        check: true,
-        identified: !hasLowConf, // collapse if there are items to check first
-      });
       setPhase("review");
     } catch {
       setErrorMessage(VISION_ERROR_MESSAGES.default);
@@ -411,14 +397,6 @@ export function KitchenSnapshotClient() {
   function removeItem(index: number) {
     setItems((prev) => prev.filter((_, i) => i !== index));
   }
-
-  const highConfidence = items
-    .map((item, i) => ({ item, i }))
-    .filter(({ item }) => item.confidence >= CONFIDENCE_THRESHOLD);
-
-  const needsCheck = items
-    .map((item, i) => ({ item, i }))
-    .filter(({ item }) => item.confidence < CONFIDENCE_THRESHOLD);
 
   const includedCount = items.filter((i) => i.included).length;
 
@@ -603,11 +581,11 @@ export function KitchenSnapshotClient() {
 
   if (phase === "review") {
     return (
-      <div className="min-h-screen bg-cubby-stone pb-32">
+      <div className="min-h-screen bg-cubby-stone" style={{ paddingBottom: "calc(var(--bottom-nav-height, 80px) + 80px)" }}>
         <PageHeader title="Kitchen snapshot" backHref="/log" />
 
         {/* Headline */}
-        <div className="px-4 pb-3 flex items-center gap-4">
+        <div className="px-4 pb-4 flex items-center gap-4">
           {photos.length > 0 && (
             // eslint-disable-next-line @next/next/no-img-element
             <img
@@ -618,7 +596,7 @@ export function KitchenSnapshotClient() {
           )}
           <div>
             <p className="font-black text-cubby-charcoal text-lg">
-              We spotted {items.length} {items.length === 1 ? "item" : "items"}
+              We spotted <span className="text-cubby-green">{items.length}</span> {items.length === 1 ? "item" : "items"}
             </p>
             <p className="text-xs text-cubby-taupe">
               Review below, then add them to your Cubby.
@@ -626,78 +604,95 @@ export function KitchenSnapshotClient() {
           </div>
         </div>
 
+        {/* Unified item list — no collapsible sections */}
         <div className="px-4 space-y-3">
-          {/* Needs checking section */}
-          {needsCheck.length > 0 && (
-            <div className="bg-cubby-cream rounded-card overflow-hidden">
-              <button
-                onClick={() => setExpandedSections((s) => ({ ...s, check: !s.check }))}
-                className="w-full px-4 py-3.5 flex items-center justify-between"
-              >
-                <div>
-                  <span className="font-black text-sm text-amber-600">Check these</span>
-                  <span className="text-cubby-taupe text-xs ml-2">({needsCheck.length})</span>
-                  <p className="text-xs text-cubby-taupe mt-0.5">Tap to review — might not be right</p>
+          {items.map((item, i) => (
+            <div
+              key={item.productName + i}
+              className={cn(
+                "cubby-card p-4 space-y-3 transition-opacity",
+                !item.included && "opacity-40"
+              )}
+            >
+              {/* Row 1: Checkbox + Name + Delete */}
+              <div className="flex items-start gap-3">
+                <button
+                  onClick={() => toggleItem(i)}
+                  className={cn(
+                    "w-6 h-6 rounded-lg border-2 flex items-center justify-center shrink-0 mt-0.5 transition-colors",
+                    item.included ? "bg-cubby-green border-cubby-green" : "border-cubby-taupe/40"
+                  )}
+                >
+                  {item.included && <Check className="w-3.5 h-3.5 text-white" strokeWidth={3} />}
+                </button>
+                <div className="flex-1 min-w-0">
+                  <p className="font-black text-sm text-cubby-charcoal leading-tight">{item.productName}</p>
+                  {item.brand && (
+                    <p className="text-xs text-cubby-taupe mt-0.5">{item.brand}</p>
+                  )}
                 </div>
-                {expandedSections.check
-                  ? <ChevronUp className="w-4 h-4 text-cubby-taupe" />
-                  : <ChevronDown className="w-4 h-4 text-cubby-taupe" />}
-              </button>
+                <button
+                  onClick={() => removeItem(i)}
+                  className="text-cubby-taupe/40 active:text-cubby-urgent transition-colors p-1"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
 
-              {expandedSections.check && (
-                <div className="divide-y divide-cubby-stone">
-                  {needsCheck.map(({ item, i }) => (
-                    <ReviewItemCard
-                      key={i}
-                      item={item}
-                      index={i}
-                      onToggle={toggleItem}
-                      onFieldChange={updateField}
-                      onRemove={removeItem}
-                    />
-                  ))}
-                </div>
+              {item.included && (
+                <>
+                  {/* Row 2: Category badge + Quantity stepper */}
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="bg-cubby-stone rounded-full px-3 py-1 text-xs font-black text-cubby-taupe">
+                      {item.category}
+                    </span>
+                    <div className="flex items-center gap-1.5 bg-cubby-stone rounded-xl px-3 py-1.5">
+                      <button
+                        onClick={() => updateField(i, "quantity", Math.max(0.5, item.quantity - 1))}
+                        className="w-7 h-7 rounded-lg bg-cubby-cream flex items-center justify-center text-cubby-charcoal active:scale-90 transition-transform"
+                      >
+                        <Minus className="w-3.5 h-3.5" />
+                      </button>
+                      <span className="w-8 text-center text-sm font-black text-cubby-charcoal">
+                        {item.quantity % 1 === 0 ? item.quantity : item.quantity.toFixed(1)}
+                      </span>
+                      <button
+                        onClick={() => updateField(i, "quantity", item.quantity + 1)}
+                        className="w-7 h-7 rounded-lg bg-cubby-green flex items-center justify-center text-white active:scale-90 transition-transform"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Row 3: Storage location */}
+                  <div className="flex gap-2 flex-wrap">
+                    {STORAGE_OPTIONS.map((opt) => (
+                      <button
+                        key={opt.id}
+                        onClick={() => updateField(i, "storageLocation", opt.id)}
+                        className={cn(
+                          "text-xs px-3 py-1.5 rounded-full font-black transition-all active:scale-95",
+                          item.storageLocation === opt.id
+                            ? "bg-cubby-green text-white"
+                            : "bg-cubby-stone text-cubby-taupe"
+                        )}
+                      >
+                        {opt.emoji} {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </>
               )}
             </div>
-          )}
-
-          {/* High confidence section */}
-          {highConfidence.length > 0 && (
-            <div className="bg-cubby-cream rounded-card overflow-hidden">
-              <button
-                onClick={() => setExpandedSections((s) => ({ ...s, identified: !s.identified }))}
-                className="w-full px-4 py-3.5 flex items-center justify-between"
-              >
-                <div>
-                  <span className="font-black text-sm text-cubby-green">Identified</span>
-                  <span className="text-cubby-taupe text-xs ml-2">({highConfidence.length})</span>
-                  <p className="text-xs text-cubby-taupe mt-0.5">High confidence</p>
-                </div>
-                {expandedSections.identified
-                  ? <ChevronUp className="w-4 h-4 text-cubby-taupe" />
-                  : <ChevronDown className="w-4 h-4 text-cubby-taupe" />}
-              </button>
-
-              {expandedSections.identified && (
-                <div className="divide-y divide-cubby-stone">
-                  {highConfidence.map(({ item, i }) => (
-                    <ReviewItemCard
-                      key={i}
-                      item={item}
-                      index={i}
-                      onToggle={toggleItem}
-                      onFieldChange={updateField}
-                      onRemove={removeItem}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
+          ))}
         </div>
 
-        {/* Sticky save bar */}
-        <div className="fixed bottom-0 left-0 right-0 bg-cubby-stone/95 backdrop-blur-sm px-4 pb-6 pt-3 border-t border-black/5">
+        {/* Sticky save bar — sits above bottom nav */}
+        <div
+          className="fixed left-0 right-0 bg-cubby-stone/95 backdrop-blur-sm px-4 pt-3 pb-4 border-t border-black/5 z-20"
+          style={{ bottom: "var(--bottom-nav-height, 80px)" }}
+        >
           <button
             onClick={handleSave}
             disabled={includedCount === 0}
@@ -861,95 +856,4 @@ export function KitchenSnapshotClient() {
   );
 }
 
-// ---------------------------------------------------------------------------
-// ReviewItemCard subcomponent
-// ---------------------------------------------------------------------------
-
-function ReviewItemCard({
-  item,
-  index,
-  onToggle,
-  onFieldChange,
-  onRemove,
-}: {
-  item: DetectedItem;
-  index: number;
-  onToggle: (i: number) => void;
-  onFieldChange: (i: number, field: string, value: unknown) => void;
-  onRemove: (i: number) => void;
-}) {
-  return (
-    <div className={cn("px-4 py-3 space-y-2", !item.included && "opacity-50")}>
-      {/* Header: checkbox + name + delete */}
-      <div className="flex items-start gap-3">
-        <button
-          onClick={() => onToggle(index)}
-          className={cn(
-            "w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 mt-0.5 transition-colors",
-            item.included ? "bg-cubby-green border-cubby-green" : "border-cubby-taupe/50"
-          )}
-        >
-          {item.included && <Check className="w-3 h-3 text-white" strokeWidth={3} />}
-        </button>
-        <div className="flex-1 min-w-0">
-          <p className="font-black text-sm text-cubby-charcoal leading-tight">{item.productName}</p>
-          {item.brand && (
-            <p className="text-xs text-cubby-taupe">{item.brand}</p>
-          )}
-        </div>
-        <button
-          onClick={() => onRemove(index)}
-          className="text-cubby-taupe/60 hover:text-cubby-urgent transition-colors"
-        >
-          <Trash2 className="w-4 h-4" />
-        </button>
-      </div>
-
-      {item.included && (
-        <>
-          {/* Category + Quantity */}
-          <div className="flex items-center justify-between gap-3 pl-8">
-            <span className="bg-cubby-stone rounded-full px-3 py-1 text-xs font-black text-cubby-taupe">
-              {item.category}
-            </span>
-            <div className="flex items-center gap-1">
-              <button
-                onClick={() => onFieldChange(index, "quantity", Math.max(0.5, item.quantity - 1))}
-                className="w-7 h-7 rounded-full bg-cubby-stone flex items-center justify-center text-cubby-charcoal"
-              >
-                <Minus className="w-3.5 h-3.5" />
-              </button>
-              <span className="w-8 text-center text-sm font-black text-cubby-charcoal">
-                {item.quantity % 1 === 0 ? item.quantity : item.quantity.toFixed(1)}
-              </span>
-              <button
-                onClick={() => onFieldChange(index, "quantity", item.quantity + 1)}
-                className="w-7 h-7 rounded-full bg-cubby-stone flex items-center justify-center text-cubby-charcoal"
-              >
-                <Plus className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          </div>
-
-          {/* Storage location chips */}
-          <div className="flex gap-1.5 flex-wrap pl-8">
-            {STORAGE_OPTIONS.map((opt) => (
-              <button
-                key={opt.id}
-                onClick={() => onFieldChange(index, "storageLocation", opt.id)}
-                className={cn(
-                  "text-xs px-2.5 py-1 rounded-full font-black border transition-all",
-                  item.storageLocation === opt.id
-                    ? "bg-cubby-green border-cubby-green text-white"
-                    : "border-cubby-stone text-cubby-taupe bg-cubby-stone"
-                )}
-              >
-                {opt.emoji} {opt.label}
-              </button>
-            ))}
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
+// ReviewItemCard removed — review UI is now inline in the review phase render
