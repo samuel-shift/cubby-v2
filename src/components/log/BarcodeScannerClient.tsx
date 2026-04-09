@@ -129,8 +129,10 @@ export function BarcodeScannerClient() {
           if (ctx) {
             ctx.drawImage(video, 0, 0);
             const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-            // Use zxing to decode
+            // Use zxing to decode (dynamic import — may not be installed in all envs)
+            // eslint-disable-next-line @typescript-eslint/no-var-requires
             const { BinaryBitmap, HybridBinarizer, MultiFormatReader, RGBLuminanceSource } =
+              // @ts-ignore — resolved at runtime via package.json
               await import("@zxing/library");
             const luminanceSource = new RGBLuminanceSource(
               new Uint8ClampedArray(imageData.data.buffer),
