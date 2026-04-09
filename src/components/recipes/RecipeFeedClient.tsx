@@ -46,7 +46,7 @@ interface Filters {
 
 // ─── Cache ────────────────────────────────────────────────────────────────────
 
-const CACHE_KEY = "cubby_recipes_v2";
+const CACHE_KEY = "cubby_recipes_v3";
 const FRESH_MS = 45 * 60 * 1000;
 const STALE_MS = 4 * 60 * 60 * 1000;
 
