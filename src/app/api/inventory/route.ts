@@ -4,15 +4,12 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 
 async function getUserId(): Promise<string | null> {
-  const nextAuth = await auth().catch(() => null);
-  if (nextAuth?.user?.id) return nextAuth.user.id;
-  const custom = await getSession();
-  return custom?.userId ?? null;
+  const session = await auth().catch(() => null);
+  return session?.user?.id ?? null;
 }
 
 const CreateItemSchema = z.object({
@@ -21,7 +18,6 @@ const CreateItemSchema = z.object({
   quantity: z.number().default(1),
   unit: z.string().optional(),
   category: z.string(),
-  categoryEmoji: z.string().optional(),
   location: z.enum(["FRIDGE", "FREEZER", "COUNTER", "CUPBOARD", "PANTRY"]).default("FRIDGE"),
   expiryDate: z.string().datetime().optional().nullable(),
   purchaseDate: z.string().datetime().optional().nullable(),
