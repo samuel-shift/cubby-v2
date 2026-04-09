@@ -7,6 +7,11 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 
+async function getUserId(): Promise<string | null> {
+  const session = await auth().catch(() => null);
+  return session?.user?.id ?? null;
+}
+
 const UpdateItemSchema = z.object({
   status: z.enum(["ACTIVE", "EATEN", "THROWN_OUT", "STILL_HERE"]).optional(),
   quantity: z.number().optional(),
@@ -20,8 +25,8 @@ interface Params {
 }
 
 export async function PATCH(req: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user?.id) return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
+  const userId = await getUserId();
+  if (!userId) return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
 
   const { id } = await params;
   const body = await req.json();
@@ -31,11 +36,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
 
-  // Ensure item belongs to user
-  const existing = await prisma.inventoryItem.findFirst({
-    where: { id, userId: session.user.id },
-  });
-
+  const existing = await prisma.inventoryItem.findFirst({ where: { id, userId } });
   if (!existing) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const updated = await prisma.inventoryItem.update({
@@ -51,18 +52,13 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 }
 
 export async function DELETE(_req: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user?.id) return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
+  const userId = await getUserId();
+  if (!userId) return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
 
   const { id } = await params;
-
-  const existing = await prisma.inventoryItem.findFirst({
-    where: { id, userId: session.user.id },
-  });
-
+  const existing = await prisma.inventoryItem.findFirst({ where: { id, userId } });
   if (!existing) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   await prisma.inventoryItem.delete({ where: { id } });
-
   return NextResponse.json({ success: true });
 }
