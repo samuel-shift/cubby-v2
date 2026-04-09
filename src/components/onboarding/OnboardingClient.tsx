@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { signIn } from "next-auth/react";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { cn } from "@/lib/utils";
@@ -86,12 +85,12 @@ export function OnboardingClient() {
     setLoading(true);
     setLoginError(null);
     try {
-      const result = await signIn("email-no-verify", {
-        email,
-        redirect: false,
-        callbackUrl: "/onboarding",
+      const res = await fetch("/api/auth/email-login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
       });
-      if (result?.error) {
+      if (!res.ok) {
         setLoginError("Something went wrong. Please try again.");
       } else {
         goNext();
