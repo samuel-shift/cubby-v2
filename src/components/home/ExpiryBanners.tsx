@@ -7,10 +7,11 @@
  * within 2 seconds of opening the app. This is the retention hook."
  *
  * Shows urgent/critical items directly on the home screen.
- * Links through to /pantry for the full list.
+ * Each banner has TWO CTAs: "Get recipe" (primary) and "Use it" (secondary).
+ * Red banners for expired, amber for expiring soon.
  */
 
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, BookOpen } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
@@ -53,6 +54,9 @@ export function ExpiryBanners() {
 
   if (loading || urgentItems.length === 0) return null;
 
+  const expiredCount = urgentItems.filter((i) => i.daysLeft < 0).length;
+  const soonCount = urgentItems.filter((i) => i.daysLeft >= 0).length;
+
   return (
     <div className="space-y-2">
       {/* Section header */}
@@ -60,41 +64,61 @@ export function ExpiryBanners() {
         <div className="flex items-center gap-1.5">
           <AlertTriangle className="w-4 h-4 text-cubby-urgent" />
           <span className="text-sm font-black text-cubby-urgent">
-            {urgentItems.length} {urgentItems.length === 1 ? "item" : "items"} expiring soon
+            {expiredCount > 0 && `${expiredCount} expired`}
+            {expiredCount > 0 && soonCount > 0 && " · "}
+            {soonCount > 0 &&
+              `${soonCount} ${soonCount === 1 ? "item" : "items"} expiring soon`}
           </span>
         </div>
-        <Link href="/pantry" className="text-xs text-cubby-taupe font-semibold">
-          See all →
+        <Link
+          href="/recipes"
+          className="flex items-center gap-1 text-xs text-cubby-green font-black"
+        >
+          <BookOpen className="w-3 h-3" />
+          Get recipes →
         </Link>
       </div>
 
-      {/* Expiry banners */}
-      {urgentItems.map((item) => (
-        <div
-          key={item.id}
-          className="flex items-center gap-3 bg-cubby-urgent/5 border border-cubby-urgent/20 rounded-2xl px-4 py-3"
-        >
-          <span className="text-2xl">{item.categoryEmoji ?? "📦"}</span>
-          <div className="flex-1 min-w-0">
-            <p className="font-black text-cubby-charcoal text-sm truncate">{item.name}</p>
-            <p className="text-xs text-cubby-urgent font-semibold">
-              {item.daysLeft < 0
-                ? "Expired"
-                : item.daysLeft === 0
-                ? "Expires today!"
-                : item.daysLeft === 1
-                ? "Expires tomorrow"
-                : `${item.daysLeft} days left`}
-            </p>
-          </div>
-          <Link
-            href="/swipe"
-            className="text-xs font-black text-cubby-green bg-cubby-lime/30 px-3 py-1.5 rounded-full"
+      {/* Expiry banners — red for expired, amber for expiring soon */}
+      {urgentItems.map((item) => {
+        const isExpired = item.daysLeft < 0;
+        return (
+          <div
+            key={item.id}
+            className={`flex items-center gap-3 rounded-2xl px-4 py-3 border ${
+              isExpired
+                ? "bg-cubby-urgent/8 border-cubby-urgent/25"
+                : "bg-amber-50 border-amber-300/30"
+            }`}
           >
-            Use it
-          </Link>
-        </div>
-      ))}
+            <span className="text-2xl">{item.categoryEmoji ?? "📦"}</span>
+            <div className="flex-1 min-w-0">
+              <p className="font-black text-cubby-charcoal text-sm truncate">
+                {item.name}
+              </p>
+              <p
+                className={`text-xs font-semibold ${
+                  isExpired ? "text-cubby-urgent" : "text-amber-600"
+                }`}
+              >
+                {item.daysLeft < 0
+                  ? `Expired ${Math.abs(item.daysLeft)}d ago`
+                  : item.daysLeft === 0
+                  ? "Expires today!"
+                  : item.daysLeft === 1
+                  ? "Expires tomorrow"
+                  : `${item.daysLeft} days left`}
+              </p>
+            </div>
+            <Link
+              href={`/recipes?highlight=${encodeURIComponent(item.name)}`}
+              className="text-[11px] font-black text-cubby-green bg-cubby-lime/30 px-3 py-1.5 rounded-full whitespace-nowrap"
+            >
+              🍳 Recipe
+            </Link>
+          </div>
+        );
+      })}
     </div>
   );
 }
