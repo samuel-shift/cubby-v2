@@ -1,18 +1,6 @@
 "use client";
 
 /**
- * ShoppingClient
- * Used by /shopping
- *
- * Tabs:
- *  - My List: smart aisle-sorted shopping list, add items, check off, clear checked
- *  - Cookbook: saved recipes → add all ingredients to list in one tap
- */
-
-import { useEffect, useState, useCallback, useRef } from "react";
-"use client";
-
-/**
  * Shopping Client â Smart Shopping List
  *
  * Two tabs:
