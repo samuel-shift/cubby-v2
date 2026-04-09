@@ -1,10 +1,13 @@
 /**
  * POST /api/log/activity — write an activity log entry
+ *
+ * Used by cook mode (MEAL_COOKED), swipe status, etc.
  */
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
+import { Prisma } from "@prisma/client";
 import { z } from "zod";
 
 async function getUserId(): Promise<string | null> {
@@ -42,7 +45,7 @@ export async function POST(req: NextRequest) {
     data: {
       userId,
       type: parsed.data.type,
-      metadata: parsed.data.metadata ?? {},
+      metadata: (parsed.data.metadata ?? {}) as Prisma.InputJsonValue,
     },
   });
 
