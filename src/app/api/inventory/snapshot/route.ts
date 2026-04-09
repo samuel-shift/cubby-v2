@@ -50,7 +50,7 @@ const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
 });
 
-const CLAUDE_MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-6";
+const CLAUDE_MODEL = process.env.ANTHROPIC_MODEL || "claude-3-5-sonnet-latest";
 
 export async function POST(req: NextRequest) {
   await getRequiredUserId(); // ensure user exists (real or demo)
@@ -155,8 +155,12 @@ Rules:
     if (!Array.isArray(result.items)) result.items = [];
 
     return NextResponse.json(result);
-  } catch (err) {
-    console.error("[snapshot] Vision API error:", err);
-    return NextResponse.json({ error: "Vision processing failed" }, { status: 500 });
+  } catch (err: unknown) {
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    console.error("[snapshot] Vision API error:", errorMessage);
+    return NextResponse.json(
+      { error: "Vision processing failed", detail: errorMessage },
+      { status: 500 }
+    );
   }
 }
