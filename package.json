@@ -2,7 +2,7 @@
   "name": "cubby-v2",
   "version": "0.1.0",
   "private": true,
- "scripts": {
+  "scripts": {
     "dev": "next dev",
     "build": "prisma db push --accept-data-loss && next build",
     "start": "next start",
