@@ -1,11 +1,6 @@
-/**
- * POST /api/auth/email-login
- * No-verification email login. Finds or creates user, creates a NextAuth
- * database session, and returns the session token.
- */
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { randomBytes } from "crypto";
+import { createSession } from "@/lib/session";
 
 export async function POST(req: NextRequest) {
   try {
@@ -15,34 +10,21 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Invalid email" }, { status: 400 });
     }
 
-    // Find or create user
     let user = await prisma.user.findUnique({ where: { email: normalised } });
     if (!user) {
       user = await prisma.user.create({ data: { email: normalised } });
     }
 
-    // Create a NextAuth database session manually
-    const sessionToken = randomBytes(32).toString("hex");
-    const expires = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 days
+    const token = await createSession(user.id, user.email);
 
-    await prisma.session.create({
-      data: {
-        sessionToken,
-        userId: user.id,
-        expires,
-      },
-    });
-
-    // Set the session cookie (NextAuth v5 uses authjs.session-token)
     const response = NextResponse.json({ ok: true });
-    response.cookies.set("authjs.session-token", sessionToken, {
+    response.cookies.set("cubby-session", token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
-      expires,
+      maxAge: 60 * 60 * 24 * 30,
       path: "/",
     });
-
     return response;
   } catch (err) {
     console.error("Email login error:", err);
