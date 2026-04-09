@@ -5,6 +5,7 @@ import Google from "next-auth/providers/google";
 import { prisma } from "@/lib/prisma";
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
+  trustHost: true,
   secret: process.env.AUTH_SECRET,
   session: { strategy: "jwt" },
   providers: [
