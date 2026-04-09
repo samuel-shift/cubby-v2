@@ -4,8 +4,16 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
+import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
+
+async function getUserId(): Promise<string | null> {
+  const nextAuth = await auth().catch(() => null);
+  if (nextAuth?.user?.id) return nextAuth.user.id;
+  const custom = await getSession();
+  return custom?.userId ?? null;
+}
 
 const OnboardingSchema = z.object({
   name: z.string().min(1),
@@ -16,8 +24,8 @@ const OnboardingSchema = z.object({
 });
 
 export async function POST(req: NextRequest) {
-  const session = await auth();
-  if (!session?.user?.id) return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
+  const userId = await getUserId();
+  if (!userId) return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
 
   const body = await req.json();
   const parsed = OnboardingSchema.safeParse(body);
@@ -27,7 +35,7 @@ export async function POST(req: NextRequest) {
   }
 
   const user = await prisma.user.update({
-    where: { id: session.user.id },
+    where: { id: userId },
     data: {
       name: parsed.data.name,
       notificationFrequency: parsed.data.notificationFrequency,
@@ -38,12 +46,8 @@ export async function POST(req: NextRequest) {
     },
   });
 
-  // Log activity
   await prisma.activityLog.create({
-    data: {
-      userId: session.user.id,
-      type: "ONBOARDING_COMPLETE",
-    },
+    data: { userId, type: "ONBOARDING_COMPLETE" },
   });
 
   return NextResponse.json({ user });
