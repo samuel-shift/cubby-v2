@@ -45,10 +45,7 @@ export async function POST(req: NextRequest) {
   if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
 
   const recipe = await prisma.savedRecipe.create({
-    data: {
-      ...parsed.data,
-      userId,
-    },
+    data: { ...parsed.data, userId },
   });
 
   return NextResponse.json({ recipe }, { status: 201 });
