@@ -8,10 +8,6 @@ import { useRouter } from "next/navigation";
 
 /**
  * KitchenSetupClient — "Complete Your Kitchen" one-time challenge
- *
- * Shows the same product grid as onboarding Quick Stock but as a standalone
- * page accessible from the Challenges section. Users tap products they have,
- * then submit to bulk-add them to inventory and mark the challenge complete.
  */
 
 export function KitchenSetupClient() {
@@ -36,7 +32,6 @@ export function KitchenSetupClient() {
     try {
       const items = Array.from(selected).map((i) => QUICK_STOCK_ITEMS[i]);
 
-      // Bulk-add items to inventory
       await Promise.allSettled(
         items.map((item) =>
           fetch("/api/inventory", {
@@ -53,7 +48,6 @@ export function KitchenSetupClient() {
         )
       );
 
-      // Mark kitchen setup challenge as complete
       try {
         await fetch("/api/kitchen-setup", {
           method: "POST",
@@ -93,7 +87,7 @@ export function KitchenSetupClient() {
   }
 
   return (
-    <div className="min-h-screen bg-cubby-stone pb-32">
+    <div className="min-h-screen bg-cubby-stone">
       {/* Header */}
       <div className="px-4 pt-14 pb-3 sticky top-0 z-10 bg-cubby-stone">
         <div className="flex items-center gap-3 mb-3">
@@ -110,8 +104,8 @@ export function KitchenSetupClient() {
         </div>
       </div>
 
-      {/* Product grid */}
-      <div className="px-4">
+      {/* Product grid — pb-40 ensures content scrolls clear of the fixed bottom bar */}
+      <div className="px-4 pb-40">
         <div className="flex flex-wrap gap-2">
           {QUICK_STOCK_ITEMS.map((item, i) => {
             const isSelected = selected.has(i);
@@ -120,7 +114,7 @@ export function KitchenSetupClient() {
                 key={item.name}
                 onClick={() => toggle(i)}
                 className={cn(
-                  "flex items-center gap-1.5 px-3.5 py-2.5 rounded-2xl text-sm font-black transition-all active:scale-95",
+                  "flex items-center gap-1.5 px-3.5 py-2.5 rounded-2xl text-sm font-black transition-colors active:scale-95",
                   isSelected
                     ? "bg-cubby-green text-white shadow-sm"
                     : "bg-cubby-cream text-cubby-charcoal border border-black/5"
@@ -128,15 +122,18 @@ export function KitchenSetupClient() {
               >
                 <span className="text-base">{item.emoji}</span>
                 <span>{item.name}</span>
-                {isSelected && <Check className="w-3.5 h-3.5 ml-0.5" strokeWidth={3} />}
+                {/* Fixed-size container prevents layout shift when check appears */}
+                <span className="w-3.5 h-3.5 ml-0.5 flex-shrink-0">
+                  {isSelected && <Check className="w-3.5 h-3.5" strokeWidth={3} />}
+                </span>
               </button>
             );
           })}
         </div>
       </div>
 
-      {/* Fixed bottom bar */}
-      <div className="fixed bottom-0 left-0 right-0 bg-cubby-stone border-t border-black/5 px-4 py-4 pb-8">
+      {/* Fixed bottom bar — safe-area-inset clears iOS home indicator */}
+      <div className="fixed bottom-0 left-0 right-0 bg-cubby-stone border-t border-black/5 px-4 pt-4 pb-[env(safe-area-inset-bottom,24px)]">
         {selected.size > 0 && (
           <p className="text-center text-sm font-black text-cubby-green mb-3">
             {selected.size} item{selected.size !== 1 ? "s" : ""} selected
