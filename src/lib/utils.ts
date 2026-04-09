@@ -31,7 +31,6 @@ export function formatExpiryLabel(date: Date | string | null | undefined): {
 
 /** Get category emoji for an item */
 export const CATEGORY_EMOJI: Record<string, string> = {
-  // Short keys (legacy)
   dairy: "🥛",
   meat: "🥩",
   fish: "🐟",
@@ -47,13 +46,11 @@ export const CATEGORY_EMOJI: Record<string, string> = {
   fruit: "🍎",
   herbs: "🌿",
   other: "📦",
-  // Full category strings from QUICK_STOCK_ITEMS
   "dairy & eggs": "🥛",
   "meat & fish": "🥩",
   "fresh produce": "🥦",
   "fruit & veg": "🍎",
   "bakery": "🍞",
-  "frozen": "🧊",
   "tins & canned": "🥫",
   "condiments & sauces": "🫙",
   "drinks & beverages": "🥤",
