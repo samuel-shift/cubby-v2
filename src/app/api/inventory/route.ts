@@ -21,6 +21,7 @@ const CreateItemSchema = z.object({
   quantity: z.number().default(1),
   unit: z.string().optional(),
   category: z.string(),
+  categoryEmoji: z.string().optional(),
   location: z.enum(["FRIDGE", "FREEZER", "COUNTER", "CUPBOARD", "PANTRY"]).default("FRIDGE"),
   expiryDate: z.string().datetime().optional().nullable(),
   purchaseDate: z.string().datetime().optional().nullable(),
