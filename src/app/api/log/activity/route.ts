@@ -5,16 +5,13 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
 
 async function getUserId(): Promise<string | null> {
-  const nextAuth = await auth().catch(() => null);
-  if (nextAuth?.user?.id) return nextAuth.user.id;
-  const custom = await getSession();
-  return custom?.userId ?? null;
+  const session = await auth().catch(() => null);
+  return session?.user?.id ?? null;
 }
 
 const ActivitySchema = z.object({
