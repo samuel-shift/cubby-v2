@@ -172,12 +172,27 @@ export function KitchenSnapshotClient() {
         streamRef.current = stream;
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
+          // On iOS Safari, onCanPlay may not fire if the video auto-plays
+          // before React attaches the handler. Use loadedmetadata + play as fallback.
+          videoRef.current.onloadedmetadata = () => {
+            videoRef.current?.play().then(() => {
+              setCameraReady(true);
+            }).catch(() => {});
+          };
+          // Also handle already-playing case
+          if (videoRef.current.readyState >= 2) {
+            setCameraReady(true);
+          }
         }
 
         // Detect torch support
         const track = stream.getVideoTracks()[0];
-        const caps = track.getCapabilities() as Record<string, unknown>;
-        if (caps.torch) setTorchSupported(true);
+        try {
+          const caps = track.getCapabilities() as Record<string, unknown>;
+          if (caps.torch) setTorchSupported(true);
+        } catch {
+          // getCapabilities not supported on all browsers
+        }
       } catch {
         if (!cancelled) {
           setCameraError(
@@ -200,6 +215,15 @@ export function KitchenSnapshotClient() {
     if (phase === "camera" && videoRef.current && streamRef.current) {
       videoRef.current.srcObject = streamRef.current;
       setCameraReady(false);
+      videoRef.current.onloadedmetadata = () => {
+        videoRef.current?.play().then(() => {
+          setCameraReady(true);
+        }).catch(() => {});
+      };
+      // Already playing
+      if (videoRef.current.readyState >= 2) {
+        setCameraReady(true);
+      }
     }
   }, [phase]);
 
@@ -542,7 +566,7 @@ export function KitchenSnapshotClient() {
         <div className="pointer-events-none absolute inset-x-0 bottom-0 h-52 bg-gradient-to-t from-black/90 to-transparent" />
 
         {/* Actions */}
-        <div className="absolute bottom-0 left-0 right-0 z-10 px-5 pb-12">
+        <div className="absolute bottom-0 left-0 right-0 z-10 px-5 pb-28">
           <div className="flex gap-3">
             <button
               onClick={retake}
@@ -793,14 +817,14 @@ export function KitchenSnapshotClient() {
       </div>
 
       {/* Privacy note */}
-      <div className="absolute bottom-36 left-0 right-0 z-10 px-6 text-center">
+      <div className="absolute bottom-52 left-0 right-0 z-10 px-6 text-center">
         <p className="text-xs text-white/40">
           Your photo is analysed and then discarded — it&apos;s never stored.
         </p>
       </div>
 
       {/* Bottom controls: Gallery · Shutter · Done */}
-      <div className="absolute bottom-0 left-0 right-0 z-10 flex items-center justify-between px-8 pb-12">
+      <div className="absolute bottom-0 left-0 right-0 z-10 flex items-center justify-between px-8 pb-28">
         {/* Gallery */}
         <button
           onClick={() => fileInputRef.current?.click()}
