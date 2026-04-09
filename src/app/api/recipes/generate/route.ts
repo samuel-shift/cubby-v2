@@ -3,13 +3,18 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import Anthropic from "@anthropic-ai/sdk";
 
+async function getUserId(): Promise<string | null> {
+  const session = await auth().catch(() => null);
+  return session?.user?.id ?? null;
+}
+
 export const maxDuration = 45;
 
 const anthropic = new Anthropic();
 
 export async function POST(req: NextRequest) {
-  const session = await auth();
-  if (!session?.user?.id)
+  const userId = await getUserId();
+  if (!userId)
     return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
 
   const body = await req.json().catch(() => ({}));
@@ -23,10 +28,9 @@ export async function POST(req: NextRequest) {
     count?: number;
   };
 
-  // ── Fetch inventory ──────────────────────────────────────────────────────
   const items = await prisma.inventoryItem.findMany({
     where: {
-      userId: session.user.id,
+      userId,
       status: "ACTIVE",
       ...(cookFromFridgeOnly ? { location: "FRIDGE" } : {}),
     },
@@ -46,9 +50,8 @@ export async function POST(req: NextRequest) {
     return `- ${item.name}${qty ? ` (${qty})` : ""}${expiringSoon ? " ⚠️ expiring soon" : ""}`;
   });
 
-  // ── Fetch user preferences ───────────────────────────────────────────────
   const userProfile = await prisma.user.findUnique({
-    where: { id: session.user.id },
+    where: { id: userId },
     select: { dietaryNeeds: true, allergens: true },
   });
 
@@ -63,7 +66,6 @@ export async function POST(req: NextRequest) {
     .filter(Boolean)
     .join("\n");
 
-  // ── Build filter context ─────────────────────────────────────────────────
   const filterContext = [
     filters.maxCookTime ? `Max total cook time: ${filters.maxCookTime} minutes` : null,
     filters.mealType ? `Meal type: ${filters.mealType}` : null,
@@ -72,7 +74,6 @@ export async function POST(req: NextRequest) {
     .filter(Boolean)
     .join("\n");
 
-  // ── Prompt ───────────────────────────────────────────────────────────────
   const prompt = `You are a helpful home cooking assistant. Generate ${count} recipe suggestions based on the user's current pantry inventory.
 
 INVENTORY:
@@ -115,7 +116,6 @@ Rules:
 - Return exactly ${count} recipes
 - Vary the meal types and difficulty levels`;
 
-  // ── Stream ───────────────────────────────────────────────────────────────
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream({
