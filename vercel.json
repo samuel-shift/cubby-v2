@@ -3,11 +3,5 @@
     "src/app/api/log/vision/route.ts": {
       "maxDuration": 60
     }
-  },
-  "crons": [
-    {
-      "path": "/api/push/send",
-      "schedule": "0 8 * * *"
-    }
-  ]
+  }
 }
