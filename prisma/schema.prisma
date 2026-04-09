@@ -278,3 +278,12 @@ model ActivityLog {
   @@index([userId, createdAt])
   @@map("activity_log")
 }
+// --- Landing Page -- Interest Signups ----------------------------------------
+
+model InterestSignup {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email     String   @unique
+  createdAt DateTime @default(now())
+
+  @@map("interest_signups")
+}
