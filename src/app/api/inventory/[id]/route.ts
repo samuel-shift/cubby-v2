@@ -38,7 +38,10 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     data: {
       ...parsed.data,
       statusUpdatedAt: parsed.data.status ? new Date() : undefined,
-      expiryDate: parsed.data.expiryDate ? new Date(parsed.data.expiryDate) : undefined,
+      // Only set expiryDate if it was explicitly provided in the request
+      expiryDate: parsed.data.expiryDate !== undefined
+        ? (parsed.data.expiryDate ? new Date(parsed.data.expiryDate) : null)
+        : undefined,
     },
   });
 
