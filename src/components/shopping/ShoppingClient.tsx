@@ -562,7 +562,7 @@ export function ShoppingClient() {
 
       {/* ══════════════════ COOKBOOK TAB ══════════════════ */}
       {tab === "cookbook" && (
-        <div className="px-4 pb-10 space-y-3 mt-2">
+        <div className="px-4 pb-28 space-y-3 mt-2">
           {recipes.length === 0 ? (
             <div className="pt-12 text-center space-y-4">
               <p className="text-5xl">📖</p>

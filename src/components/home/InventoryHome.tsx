@@ -487,7 +487,7 @@ export function InventoryHome() {
       </div>
 
       {/* Item list — grouped by urgency when sorting by expiry */}
-      <div className="space-y-4 pb-8">
+      <div className="space-y-4 pb-20">
         {sortMode === "expiry" ? (
           // Render urgency groups
           (Object.entries(grouped) as [UrgencyGroup, InventoryItem[]][])

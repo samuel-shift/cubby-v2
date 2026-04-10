@@ -197,7 +197,7 @@ export function ManualEntryClient() {
     <div className="min-h-screen bg-cubby-stone">
       <PageHeader title="Type it in" backHref="/log" />
 
-      <form onSubmit={handleSubmit} className="px-4 pb-10 space-y-4">
+      <form onSubmit={handleSubmit} className="px-4 pb-28 space-y-4">
 
         {/* Product name */}
         <div className="bg-cubby-cream rounded-card p-4 space-y-2">

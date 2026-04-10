@@ -420,7 +420,7 @@ export function BarcodeScannerClient() {
       )}
 
       {phase === "review" && product && (
-        <div className="px-4 space-y-4 pb-10">
+        <div className="px-4 space-y-4 pb-28">
           <div className="bg-cubby-cream rounded-card p-5 space-y-1">
             <div className="flex items-start justify-between gap-2">
               <div>

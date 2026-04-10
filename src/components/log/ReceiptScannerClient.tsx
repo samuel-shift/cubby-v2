@@ -452,7 +452,7 @@ export function ReceiptScannerClient() {
 
       {/* ── Sticky save bar ── */}
       {phase === "review" && (
-        <div className="fixed bottom-0 left-0 right-0 bg-cubby-stone/95 backdrop-blur-sm px-4 pb-6 pt-3 border-t border-black/5">
+        <div className="fixed left-0 right-0 bg-cubby-stone/95 backdrop-blur-sm px-4 pb-4 pt-3 border-t border-black/5 z-40" style={{ bottom: "var(--bottom-nav-height, 80px)" }}>
           <button
             onClick={handleSave}
             disabled={selectedCount === 0}

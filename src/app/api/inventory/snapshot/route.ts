@@ -34,6 +34,7 @@ export interface DetectedItem {
   quantity: number;
   unit: string | null;
   confidence: number; // 0.0 – 1.0
+  estimatedExpiryDays: number | null; // estimated days until expiry based on item type
 }
 
 interface VisionResult {
@@ -104,7 +105,8 @@ Return ONLY a JSON object matching this exact structure (no markdown, no code fe
       "storageLocation": "FRIDGE or FREEZER or PANTRY or OTHER",
       "quantity": 1,
       "unit": "pcs or g or ml or null",
-      "confidence": 0.9
+      "confidence": 0.9,
+      "estimatedExpiryDays": 5
     }
   ],
   "inferredLocation": "FRIDGE or FREEZER or PANTRY or null",
@@ -116,6 +118,7 @@ Rules:
 - Do NOT include cleaning products, medicine, pet food, or non-food items
 - Infer storageLocation from visual context: open fridge shelf → FRIDGE, visible frost/ice → FREEZER, dry cupboard/pantry shelf → PANTRY
 - Confidence: 0.9+ for clearly readable labels, 0.65–0.89 for partially visible items, below 0.65 for educated guesses
+- estimatedExpiryDays: estimated days from today until the item typically expires. Use realistic UK supermarket shelf-life guidelines: fresh meat 2-4 days, fresh fish 1-2 days, milk 7 days, eggs 28 days, fresh fruit/veg 3-7 days, bread 5 days, cheese 14 days, cooked leftovers 3 days, tinned/canned goods null (long life), frozen items null (long life), condiments null. If a date label is visible in the photo, use that instead. Return null if unknown or very long shelf life.
 - If the photo is too dark to identify items: { "items": [], "inferredLocation": null, "error": "TOO_DARK" }
 - If no food is visible: { "items": [], "inferredLocation": null, "error": "NO_FOOD" }
 - If the photo is too blurry to read: { "items": [], "inferredLocation": null, "error": "BLURRY" }

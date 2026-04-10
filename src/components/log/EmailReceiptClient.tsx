@@ -92,7 +92,7 @@ export function EmailReceiptClient() {
     <div className="min-h-screen bg-cubby-stone">
       <PageHeader title="Email receipt" backHref="/log" />
 
-      <div className="px-4 pb-10 space-y-5">
+      <div className="px-4 pb-28 space-y-5">
 
         {/* Hero */}
         <div className="bg-cubby-cream rounded-card p-5 space-y-2 text-center">

@@ -63,6 +63,7 @@ interface DetectedItem {
   quantity: number;
   unit: string | null;
   confidence: number; // 0.0 – 1.0
+  estimatedExpiryDays: number | null; // AI-estimated shelf life in days
   included: boolean;  // user toggle for save
 }
 
@@ -362,6 +363,7 @@ export function KitchenSnapshotClient() {
           quantity: item.quantity ?? 1,
           unit: item.unit ?? null,
           confidence: typeof item.confidence === "number" ? item.confidence : 0.5,
+          estimatedExpiryDays: typeof item.estimatedExpiryDays === "number" ? item.estimatedExpiryDays : null,
           included: true,
         })
       );
@@ -410,6 +412,14 @@ export function KitchenSnapshotClient() {
     let saved = 0;
     await Promise.allSettled(
       toSave.map(async (item) => {
+        // Calculate expiry date from estimated days
+        let expiryDate: string | undefined;
+        if (item.estimatedExpiryDays && item.estimatedExpiryDays > 0) {
+          const d = new Date();
+          d.setDate(d.getDate() + item.estimatedExpiryDays);
+          expiryDate = d.toISOString();
+        }
+
         const res = await fetch("/api/inventory", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -420,6 +430,7 @@ export function KitchenSnapshotClient() {
             category: item.category,
             location: item.storageLocation === "OTHER" ? "PANTRY" : item.storageLocation,
             entryMethod: "SNAPSHOT",
+            ...(expiryDate && { expiryDate }),
           }),
         });
         if (res.ok) saved++;
@@ -457,7 +468,7 @@ export function KitchenSnapshotClient() {
               Take another photo
             </button>
             <Link
-              href="/pantry"
+              href="/recipes?tab=pantry"
               className="block w-full bg-cubby-lime text-cubby-green py-3.5 rounded-2xl font-black text-sm text-center active:scale-[0.97] transition-transform"
             >
               View my kitchen
@@ -682,6 +693,19 @@ export function KitchenSnapshotClient() {
                       </button>
                     ))}
                   </div>
+
+                  {/* Row 4: Estimated expiry */}
+                  {item.estimatedExpiryDays !== null && item.estimatedExpiryDays > 0 && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-cubby-taupe">⏰</span>
+                      <span className={cn(
+                        "text-xs font-black",
+                        item.estimatedExpiryDays <= 3 ? "text-cubby-salmon" : "text-cubby-taupe"
+                      )}>
+                        ~{item.estimatedExpiryDays}d shelf life
+                      </span>
+                    </div>
+                  )}
                 </>
               )}
             </div>

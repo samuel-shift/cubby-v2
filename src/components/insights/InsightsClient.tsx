@@ -230,7 +230,7 @@ export function InsightsClient() {
     <div className="min-h-screen bg-cubby-stone">
       <PageHeader title="Insights" />
 
-      <div className="px-4 pb-10 space-y-4">
+      <div className="px-4 pb-28 space-y-4">
         {/* Hero stat */}
         <div className="bg-cubby-green rounded-card p-6 text-center space-y-2 animate-spring-pop">
           <span className="text-4xl">{heroStat.emoji}</span>

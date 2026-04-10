@@ -61,7 +61,7 @@ export function LogFoodClient() {
     <div className="min-h-screen bg-cubby-stone">
       <PageHeader title="Log food" backHref="/" />
 
-      <div className="px-4 space-y-6 pb-10">
+      <div className="px-4 space-y-6 pb-28">
         {/* Main 3 options */}
         {LOG_OPTIONS.map((option) => (
           <div key={option.id} className="space-y-2">
