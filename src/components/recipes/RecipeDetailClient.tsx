@@ -290,7 +290,7 @@ export function RecipeDetailClient({ savedRecipe }: { savedRecipe?: SavedRecipeS
         if (r) { setRecipe(r); return; }
       }
       // Fallback: localStorage
-      const local = localStorage.getItem("cubby_recipes_v2");
+      const local = localStorage.getItem("cubby_recipes_v3");
       if (local) {
         const { recipes }: { recipes: GeneratedRecipe[] } = JSON.parse(local);
         const r = recipes[parseInt(idx, 10)];
