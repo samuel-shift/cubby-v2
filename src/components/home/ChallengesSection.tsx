@@ -1,11 +1,12 @@
 "use client";
 
 /**
- * Challenges Section
+ * Challenges Section — shows actionable challenges with real progress from API
  */
 
 import Link from "next/link";
-import { Smartphone, Award, Trash2, Users, UtensilsCrossed } from "lucide-react";
+import { Smartphone, Users, UtensilsCrossed } from "lucide-react";
+import { useState, useEffect } from "react";
 import { cn } from "@/lib/utils";
 
 interface Challenge {
@@ -20,65 +21,58 @@ interface Challenge {
   bgColor: string;
 }
 
-const CHALLENGES: Challenge[] = [
-  {
-    id: "kitchen-setup",
-    title: "Complete Your Kitchen",
-    description: "Stock up with common items in 60 seconds",
-    icon: UtensilsCrossed,
-    href: "/kitchen-setup",
-    color: "text-cubby-green",
-    bgColor: "bg-cubby-green/15",
-  },
-  {
-    id: "swipe-status",
-    title: "Swipe Status",
-    description: "Sort what's in your kitchen",
-    icon: Smartphone,
-    href: "/swipe",
-    progress: 60,
-    color: "text-cubby-green",
-    bgColor: "bg-cubby-lime/25",
-  },
-  {
-    id: "leftover-legend",
-    title: "Leftover Legend",
-    description: "Cook with leftovers 3x this week",
-    icon: Award,
-    href: "/swipe",
-    progress: 33,
-    color: "text-amber-600",
-    bgColor: "bg-cubby-pastel-yellow",
-  },
-  {
-    id: "empty-bin-week",
-    title: "Empty Bin Week",
-    description: "Zero waste for 7 days",
-    icon: Trash2,
-    href: "/swipe",
-    progress: 71,
-    color: "text-cubby-green",
-    bgColor: "bg-cubby-pastel-green",
-  },
-  {
-    id: "friends-fridge",
-    title: "Friend's Fridge",
-    description: "Compare kitchens with a friend",
-    icon: Users,
-    href: "#",
-    comingSoon: true,
-    color: "text-cubby-taupe",
-    bgColor: "bg-cubby-taupe/10",
-  },
-];
-
 export function ChallengesSection() {
+  const [itemCount, setItemCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    fetch("/api/inventory")
+      .then((r) => r.json())
+      .then((data) => {
+        if (Array.isArray(data.items)) setItemCount(data.items.length);
+      })
+      .catch(() => {});
+  }, []);
+
+  // Build challenges with real data where possible
+  const challenges: Challenge[] = [
+    {
+      id: "kitchen-setup",
+      title: "Complete Your Kitchen",
+      description: "Stock up with common items in 60 seconds",
+      icon: UtensilsCrossed,
+      href: "/kitchen-setup",
+      color: "text-cubby-green",
+      bgColor: "bg-cubby-green/15",
+    },
+    {
+      id: "swipe-status",
+      title: "Swipe Status",
+      description: itemCount !== null && itemCount > 0
+        ? `Sort your ${itemCount} item${itemCount !== 1 ? "s" : ""}`
+        : "Sort what's in your kitchen",
+      icon: Smartphone,
+      href: "/swipe",
+      color: "text-cubby-green",
+      bgColor: "bg-cubby-lime/25",
+    },
+    {
+      id: "friends-fridge",
+      title: "Friend's Fridge",
+      description: "Compare kitchens with a friend",
+      icon: Users,
+      href: "#",
+      comingSoon: true,
+      color: "text-cubby-taupe",
+      bgColor: "bg-cubby-taupe/10",
+    },
+  ];
+
   return (
     <div className="space-y-3 pb-6">
       <h2 className="text-section-head text-cubby-charcoal">Challenges 🏆</h2>
 
       <div className="space-y-2.5">
-        {CHALLENGES.map((challenge) => {
+        {challenges.map((challenge) => {
           const Icon = challenge.icon;
 
           return (
