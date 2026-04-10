@@ -43,7 +43,7 @@ export function RecipeIdeasFan() {
 
     // Fallback: localStorage cache
     try {
-      const local = localStorage.getItem("cubby_recipes_v2");
+      const local = localStorage.getItem("cubby_recipes_v3");
       if (local) {
         const { recipes: cached }: { recipes: CachedRecipe[] } = JSON.parse(local);
         if (cached?.length > 0) {
