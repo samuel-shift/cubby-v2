@@ -121,14 +121,14 @@ function CookMode({
 
   if (showOutcome) {
     return (
-      <div className="fixed inset-0 z-50 bg-cubby-stone flex items-end justify-center">
-        <div className="bg-cubby-cream rounded-t-3xl w-full max-w-lg p-6 space-y-4 pb-10">
+      <div className="fixed inset-0 z-[60] bg-cubby-stone/95 flex items-center justify-center px-4">
+        <div className="bg-cubby-cream rounded-3xl w-full max-w-lg p-6 space-y-4 shadow-xl">
           <p className="font-black text-cubby-charcoal text-xl text-center">How did it go? 🍽️</p>
           <p className="text-cubby-taupe text-sm text-center">This helps Cubby learn what to suggest next</p>
           <div className="space-y-3">
             <button
               onClick={() => handleOutcome("eaten")}
-              className="w-full p-4 rounded-2xl bg-cubby-lime/30 text-cubby-green font-black text-left flex items-center gap-3"
+              className="w-full p-4 rounded-2xl bg-cubby-lime/30 text-cubby-green font-black text-left flex items-center gap-3 active:scale-[0.98] transition-transform"
             >
               <span className="text-2xl">✅</span>
               <div>
@@ -138,7 +138,7 @@ function CookMode({
             </button>
             <button
               onClick={() => handleOutcome("some_waste")}
-              className="w-full p-4 rounded-2xl bg-cubby-stone text-cubby-charcoal font-black text-left flex items-center gap-3"
+              className="w-full p-4 rounded-2xl bg-cubby-stone text-cubby-charcoal font-black text-left flex items-center gap-3 active:scale-[0.98] transition-transform"
             >
               <span className="text-2xl">🤏</span>
               <div>
@@ -148,7 +148,7 @@ function CookMode({
             </button>
             <button
               onClick={() => handleOutcome("all_waste")}
-              className="w-full p-4 rounded-2xl bg-cubby-salmon/20 text-cubby-urgent font-black text-left flex items-center gap-3"
+              className="w-full p-4 rounded-2xl bg-cubby-salmon/20 text-cubby-urgent font-black text-left flex items-center gap-3 active:scale-[0.98] transition-transform"
             >
               <span className="text-2xl">🗑️</span>
               <div>
@@ -164,7 +164,7 @@ function CookMode({
 
   if (showExitConfirm) {
     return (
-      <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center px-6">
+      <div className="fixed inset-0 z-[60] bg-black/60 flex items-center justify-center px-6">
         <div className="bg-cubby-cream rounded-3xl p-6 w-full max-w-sm space-y-4">
           <p className="font-black text-cubby-charcoal text-lg text-center">Exit cook mode?</p>
           <p className="text-cubby-taupe text-sm text-center">Your progress won&apos;t be saved</p>
@@ -188,7 +188,7 @@ function CookMode({
   }
 
   return (
-    <div className="fixed inset-0 z-40 bg-cubby-stone flex flex-col">
+    <div className="fixed inset-0 z-[60] bg-cubby-stone flex flex-col">
       {/* Header */}
       <div className="bg-cubby-cream px-4 py-4 flex items-center justify-between border-b border-cubby-stone">
         <div>
@@ -411,8 +411,11 @@ export function RecipeDetailClient({ savedRecipe }: { savedRecipe?: SavedRecipeS
         </div>
       </div>
 
-      {/* Cook button — fixed bottom */}
-      <div className="fixed bottom-0 left-0 right-0 px-4 pb-8 pt-4 bg-gradient-to-t from-cubby-stone via-cubby-stone to-transparent pointer-events-none">
+      {/* Cook button — fixed above bottom nav */}
+      <div
+        className="fixed left-0 right-0 px-4 pb-4 pt-4 bg-gradient-to-t from-cubby-stone via-cubby-stone to-transparent pointer-events-none z-40"
+        style={{ bottom: "var(--bottom-nav-height, 80px)" }}
+      >
         <button
           onClick={() => setCookMode(true)}
           className="w-full bg-cubby-green text-white py-4 rounded-2xl font-black text-base shadow-lg pointer-events-auto active:scale-[0.98] transition-transform"
