@@ -25,8 +25,22 @@ Be thorough — check shelves, fridge contents, counters, any packaging visible.
 For each item return: name (specific product name), quantity (number estimate), unit (g/ml/items), category (produce/dairy/meat/bakery/frozen/canned/condiment/snacks/drinks/other), storageLocation (fridge/freezer/counter/cupboard/pantry), confidence (high/medium/low).
 Return ONLY a valid JSON array with no explanation or markdown: [{name, quantity, unit, category, storageLocation, confidence}]`,
 
-  meal: `You are a meal ingredient identifier. Given a photo of a cooked meal, identify the likely ingredients used.
-Return ONLY a valid JSON array, no explanation: [{name, quantity, unit, category}]`,
+  meal: `You are a smart meal identifier for a kitchen inventory app called Cubby. Given a photo of a cooked meal:
+
+1. First, identify WHAT the meal is (e.g. "Spaghetti Bolognese", "Chicken Stir Fry", "Lamb Kofta with Rice")
+2. Then list the likely raw ingredients that went into making it, with realistic UK household quantities
+
+Return ONLY valid JSON with no explanation or markdown:
+{
+  "mealName": "Name of the identified meal",
+  "mealEmoji": "single emoji representing the meal",
+  "confidence": "high" | "medium" | "low",
+  "ingredients": [{"name": "Ingredient Name", "quantity": 1, "unit": "kg", "category": "meat|produce|dairy|dry|condiments|other"}]
+}
+
+Be specific with ingredient names (e.g. "Chicken Breast" not just "chicken", "Minced Beef" not just "beef").
+Use realistic UK cooking quantities (e.g. 500g minced beef, 1 onion, 2 cloves garlic).
+Category must be one of: meat, produce, dairy, bakery, dry, condiments, frozen, snacks, drinks, other.`,
 
   waste: `You are a food waste logger. Given a photo of food being thrown away, identify the wasted items.
 Estimate the approximate monetary value wasted (GBP).
@@ -87,7 +101,20 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const extracted = JSON.parse(jsonMatch[0]);
+    const parsed = JSON.parse(jsonMatch[0]);
+
+    // For meal type, return the structured meal object
+    if (entryType === "meal" && parsed.mealName) {
+      return NextResponse.json({
+        mealName: parsed.mealName,
+        mealEmoji: parsed.mealEmoji ?? "🍽️",
+        confidence: parsed.confidence ?? "medium",
+        extracted: parsed.ingredients ?? [],
+        entryType,
+      });
+    }
+
+    const extracted = Array.isArray(parsed) ? parsed : parsed.items ?? parsed;
     return NextResponse.json({ extracted, entryType });
   } catch {
     return NextResponse.json({ error: "Invalid JSON from AI", raw: text }, { status: 422 });
