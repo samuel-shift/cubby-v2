@@ -7,7 +7,7 @@
  */
 
 import Link from "next/link";
-import { Camera, Receipt, KeyboardIcon, Mic, Mail, ScanLine } from "lucide-react";
+import { Camera, Receipt, KeyboardIcon, Mic, Mail, ScanLine, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PageHeader } from "@/components/ui/PageHeader";
 
@@ -54,6 +54,7 @@ const LOG_OPTIONS = [
 const MORE_OPTIONS = [
   { label: "Kitchen snapshot", icon: Camera, href: "/log/snapshot", description: "Multi-photo scan of your kitchen" },
   { label: "Email receipt", icon: Mail, href: "/log/email-receipt", description: "Set up supermarket email forwarding" },
+  { label: "I threw food away", icon: Trash2, href: "/log/waste", description: "Log wasted items to track your waste" },
 ];
 
 export function LogFoodClient() {
