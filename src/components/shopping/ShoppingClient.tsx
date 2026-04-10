@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Check, Plus, Trash2, X, ChefHat, ShoppingCart, RefreshCw } from "lucide-react";
+import { Check, Plus, Trash2, X, ChefHat, ShoppingCart, RefreshCw, Sparkles, ShoppingBag } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Typeahead } from "@/components/ui/Typeahead";
 import { GROCERY_SUGGESTIONS, detectAisleOrder, detectCategory } from "@/lib/grocery-data";
@@ -44,50 +44,42 @@ interface Recipe {
   tags: string[];
 }
 
+interface GeneratedItem {
+  name: string;
+  quantity: number;
+  unit: string | null;
+  category: string;
+  reason: string;
+  included: boolean;
+}
+
 // ─── Aisle grouping ───────────────────────────────────────────────────────────
 
 const AISLE_ORDER: Record<string, number> = {
-  produce: 1,
-  fruit: 1,
-  vegetables: 1,
-  veg: 1,
-  meat: 2,
-  fish: 2,
-  seafood: 2,
-  poultry: 2,
-  dairy: 3,
-  eggs: 3,
-  cheese: 3,
-  bakery: 4,
-  bread: 4,
+  produce: 1, fruit: 1, vegetables: 1, veg: 1,
+  meat: 2, fish: 2, seafood: 2, poultry: 2,
+  dairy: 3, eggs: 3, cheese: 3,
+  bakery: 4, bread: 4,
   frozen: 5,
-  "ambient dry": 6,
-  pasta: 6,
-  rice: 6,
-  cereal: 6,
-  tinned: 6,
-  canned: 6,
-  sauce: 7,
-  condiment: 7,
+  "ambient dry": 6, pasta: 6, rice: 6, cereal: 6, tinned: 6, canned: 6, dry: 6,
+  sauce: 7, condiment: 7, condiments: 7,
   snacks: 8,
-  drinks: 9,
-  beverage: 9,
+  drinks: 9, beverage: 9,
   household: 10,
   other: 11,
 };
 
 const AISLE_LABELS: Record<number, string> = {
-  1: "🥦 Fresh Produce",
-  2: "🥩 Meat & Fish",
-  3: "🥛 Dairy & Eggs",
-  4: "🍞 Bakery",
-  5: "❄️ Frozen",
-  6: "🥫 Dry & Tinned",
-  7: "🧴 Sauces",
-  8: "🍿 Snacks",
-  9: "🧃 Drinks",
-  10: "🧹 Household",
-  11: "🛒 Other",
+  1: "🥦 Fresh Produce", 2: "🥩 Meat & Fish", 3: "🥛 Dairy & Eggs",
+  4: "🍞 Bakery", 5: "❄️ Frozen", 6: "🥫 Dry & Tinned",
+  7: "🧴 Sauces", 8: "🍿 Snacks", 9: "🧃 Drinks",
+  10: "🧹 Household", 11: "🛒 Other",
+};
+
+const CATEGORY_EMOJI: Record<string, string> = {
+  produce: "🥦", meat: "🥩", dairy: "🥛", bakery: "🍞", frozen: "❄️",
+  dry: "🥫", condiments: "🧴", snacks: "🍿", drinks: "🧃",
+  household: "🧹", other: "🛒",
 };
 
 function getAisleOrder(category?: string): number {
@@ -105,9 +97,19 @@ function groupByAisle(items: ShoppingItem[]): Map<number, ShoppingItem[]> {
     if (!map.has(aisle)) map.set(aisle, []);
     map.get(aisle)!.push(item);
   });
-  // Sort by aisle number
   return new Map([...map.entries()].sort(([a], [b]) => a - b));
 }
+
+// ─── Loading messages ─────────────────────────────────────────────────────────
+
+const LOADING_MESSAGES = [
+  "Checking what's in your kitchen…",
+  "Analysing your eating habits…",
+  "Spotting what you're running low on…",
+  "Checking your favourite recipes…",
+  "Building your personalised shop…",
+  "Nearly there…",
+];
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -123,9 +125,13 @@ export function ShoppingClient() {
   const [showAddForm, setShowAddForm] = useState(false);
   const [addingRecipeId, setAddingRecipeId] = useState<string | null>(null);
   const [addedRecipeId, setAddedRecipeId] = useState<string | null>(null);
-  const [suggestions, setSuggestions] = useState<{ name: string; reason: string; emoji: string }[]>([]);
-  const [addingSuggestion, setAddingSuggestion] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // AI generation state
+  const [generating, setGenerating] = useState(false);
+  const [generatedItems, setGeneratedItems] = useState<GeneratedItem[] | null>(null);
+  const [loadingMsgIdx, setLoadingMsgIdx] = useState(0);
+  const [addingGenerated, setAddingGenerated] = useState(false);
 
   // ─── Load data ───────────────────────────────────────────────────────────
 
@@ -153,32 +159,99 @@ export function ShoppingClient() {
     }
   }, []);
 
-  const loadSuggestions = useCallback(async () => {
-    try {
-      const res = await fetch("/api/shopping/suggestions");
-      if (!res.ok) return;
-      const data = await res.json();
-      setSuggestions(Array.isArray(data) ? data : []);
-    } catch {
-      // silent
-    }
-  }, []);
-
   useEffect(() => {
     loadList();
     loadRecipes();
-    loadSuggestions();
-  }, [loadList, loadRecipes, loadSuggestions]);
+  }, [loadList, loadRecipes]);
 
   useEffect(() => {
     if (showAddForm) setTimeout(() => inputRef.current?.focus(), 100);
   }, [showAddForm]);
 
-  // ─── Actions ─────────────────────────────────────────────────────────────
+  // Cycle loading messages during generation
+  useEffect(() => {
+    if (!generating) return;
+    const interval = setInterval(() => {
+      setLoadingMsgIdx((prev) => (prev + 1) % LOADING_MESSAGES.length);
+    }, 2500);
+    return () => clearInterval(interval);
+  }, [generating]);
+
+  // ─── AI Generation ──────────────────────────────────────────────────────
+
+  async function handleGenerate() {
+    setGenerating(true);
+    setLoadingMsgIdx(0);
+    try {
+      const res = await fetch("/api/shopping/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      if (!res.ok) throw new Error("Generation failed");
+      const data = await res.json();
+      if (Array.isArray(data.items)) {
+        setGeneratedItems(data.items.map((item: Omit<GeneratedItem, "included">) => ({
+          ...item,
+          included: true,
+        })));
+      }
+    } catch (err) {
+      console.error("Generate error:", err);
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  function handleToggleGenerated(idx: number) {
+    setGeneratedItems((prev) =>
+      prev?.map((item, i) => i === idx ? { ...item, included: !item.included } : item) ?? null
+    );
+  }
+
+  async function handleAddGeneratedToList() {
+    if (!generatedItems) return;
+    const toAdd = generatedItems.filter((i) => i.included);
+    if (toAdd.length === 0) return;
+
+    setAddingGenerated(true);
+    try {
+      const results = await Promise.allSettled(
+        toAdd.map((item) =>
+          fetch("/api/shopping", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              name: item.name,
+              quantity: item.quantity,
+              unit: item.unit,
+              category: item.category,
+              aisleOrder: detectAisleOrder(item.name) || getAisleOrder(item.category),
+            }),
+          }).then((r) => r.json())
+        )
+      );
+
+      const newItems: ShoppingItem[] = results
+        .filter((r) => r.status === "fulfilled")
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .map((r) => (r as any).value.item)
+        .filter(Boolean);
+
+      setList((prev) =>
+        prev ? { ...prev, items: [...prev.items, ...newItems] } : prev
+      );
+      setGeneratedItems(null);
+    } catch {
+      // silent
+    } finally {
+      setAddingGenerated(false);
+    }
+  }
+
+  // ─── Manual Actions ─────────────────────────────────────────────────────
 
   function handleSelectSuggestion(val: string) {
     setNewItemName(val);
-    // Auto-detect category and aisle from grocery data
     const detectedCat = detectCategory(val);
     if (detectedCat !== "Other") setNewItemCategory(detectedCat);
   }
@@ -190,7 +263,6 @@ export function ShoppingClient() {
       const name = newItemName.trim();
       const category = newItemCategory.trim() || detectCategory(name);
       const aisleOrder = detectAisleOrder(name);
-
       const res = await fetch("/api/shopping", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -209,7 +281,6 @@ export function ShoppingClient() {
       setNewItemName("");
       setNewItemQty(1);
       setNewItemCategory("");
-      // Keep form open for quick multi-add
       inputRef.current?.focus();
     } catch {
       // silent
@@ -219,15 +290,9 @@ export function ShoppingClient() {
   }
 
   async function handleToggleCheck(item: ShoppingItem) {
-    // Optimistic update
     setList((prev) =>
       prev
-        ? {
-            ...prev,
-            items: prev.items.map((i) =>
-              i.id === item.id ? { ...i, checked: !i.checked } : i
-            ),
-          }
+        ? { ...prev, items: prev.items.map((i) => i.id === item.id ? { ...i, checked: !i.checked } : i) }
         : prev
     );
     try {
@@ -237,15 +302,9 @@ export function ShoppingClient() {
         body: JSON.stringify({ checked: !item.checked }),
       });
     } catch {
-      // revert on error
       setList((prev) =>
         prev
-          ? {
-              ...prev,
-              items: prev.items.map((i) =>
-                i.id === item.id ? { ...i, checked: item.checked } : i
-              ),
-            }
+          ? { ...prev, items: prev.items.map((i) => i.id === item.id ? { ...i, checked: item.checked } : i) }
           : prev
       );
     }
@@ -258,14 +317,13 @@ export function ShoppingClient() {
     try {
       await fetch(`/api/shopping/${id}`, { method: "DELETE" });
     } catch {
-      // silent — item was already removed from UI
+      // silent
     }
   }
 
   async function handleClearChecked() {
     const checked = list?.items.filter((i) => i.checked) ?? [];
     if (checked.length === 0) return;
-    // Optimistic
     setList((prev) =>
       prev ? { ...prev, items: prev.items.filter((i) => !i.checked) } : prev
     );
@@ -274,35 +332,6 @@ export function ShoppingClient() {
         fetch(`/api/shopping/${item.id}`, { method: "DELETE" })
       )
     );
-  }
-
-  async function handleAddSuggestion(suggestion: { name: string; reason: string; emoji: string }) {
-    setAddingSuggestion(suggestion.name);
-    try {
-      const category = detectCategory(suggestion.name);
-      const aisleOrder = detectAisleOrder(suggestion.name);
-      const res = await fetch("/api/shopping", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: suggestion.name,
-          quantity: 1,
-          category: category !== "Other" ? category : undefined,
-          aisleOrder,
-        }),
-      });
-      if (!res.ok) return;
-      const data = await res.json();
-      setList((prev) =>
-        prev ? { ...prev, items: [...prev.items, data.item] } : prev
-      );
-      // Remove from suggestions list
-      setSuggestions((prev) => prev.filter((s) => s.name !== suggestion.name));
-    } catch {
-      // silent
-    } finally {
-      setAddingSuggestion(null);
-    }
   }
 
   async function handleAddRecipeToList(recipe: Recipe) {
@@ -322,19 +351,16 @@ export function ShoppingClient() {
           }).then((r) => r.json())
         )
       );
-
       const newItems: ShoppingItem[] = results
         .filter((r) => r.status === "fulfilled")
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         .map((r) => (r as any).value.item)
         .filter(Boolean);
-
       setList((prev) =>
         prev ? { ...prev, items: [...prev.items, ...newItems] } : prev
       );
       setAddedRecipeId(recipe.id);
       setTimeout(() => setAddedRecipeId(null), 2000);
-      // Switch to list tab
       setTimeout(() => setTab("list"), 800);
     } catch {
       // silent
@@ -401,49 +427,147 @@ export function ShoppingClient() {
             <div className="pt-16 text-center">
               <div className="w-8 h-8 border-4 border-cubby-green border-t-transparent rounded-full animate-spin mx-auto" />
             </div>
+          ) : generating ? (
+            /* ── AI Generation Loading ── */
+            <div className="pt-16 flex flex-col items-center text-center space-y-6">
+              <div className="relative w-20 h-20">
+                <div className="absolute inset-0 rounded-full border-4 border-cubby-lime/30 animate-ping" />
+                <div className="w-20 h-20 rounded-full bg-cubby-lime/20 flex items-center justify-center">
+                  <Sparkles className="w-10 h-10 text-cubby-green animate-pulse" />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <p className="font-black text-cubby-charcoal text-lg">Building your shop</p>
+                <p className="text-cubby-taupe text-sm font-semibold animate-pulse">
+                  {LOADING_MESSAGES[loadingMsgIdx]}
+                </p>
+              </div>
+            </div>
+          ) : generatedItems ? (
+            /* ── AI Review Screen ── */
+            <div className="space-y-4">
+              <div className="text-center space-y-1 pt-2">
+                <p className="font-black text-cubby-charcoal text-lg">
+                  Your smart shop
+                </p>
+                <p className="text-cubby-taupe text-sm">
+                  {generatedItems.filter((i) => i.included).length} items selected · tap to remove
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                {generatedItems.map((item, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => handleToggleGenerated(idx)}
+                    className={cn(
+                      "w-full cubby-card px-4 py-3.5 flex items-center gap-3 text-left transition-all active:scale-[0.98]",
+                      !item.included && "opacity-40"
+                    )}
+                  >
+                    {/* Checkbox */}
+                    <div className={cn(
+                      "w-6 h-6 rounded-lg border-2 flex items-center justify-center shrink-0 transition-all",
+                      item.included ? "bg-cubby-green border-cubby-green" : "border-cubby-taupe/30"
+                    )}>
+                      {item.included && <Check className="w-3.5 h-3.5 text-white" strokeWidth={3} />}
+                    </div>
+
+                    {/* Emoji */}
+                    <span className="text-xl shrink-0">{CATEGORY_EMOJI[item.category] ?? "🛒"}</span>
+
+                    {/* Details */}
+                    <div className="flex-1 min-w-0">
+                      <p className={cn(
+                        "font-black text-sm text-cubby-charcoal leading-tight",
+                        !item.included && "line-through"
+                      )}>
+                        {item.name}
+                      </p>
+                      <p className="text-xs text-cubby-taupe mt-0.5">
+                        {item.quantity}{item.unit ? ` ${item.unit}` : ""} · {item.reason}
+                      </p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+
+              {/* Action buttons */}
+              <div className="space-y-2 pt-2">
+                <button
+                  onClick={handleAddGeneratedToList}
+                  disabled={addingGenerated || generatedItems.filter((i) => i.included).length === 0}
+                  className={cn(
+                    "w-full bg-cubby-green text-white py-4 rounded-2xl font-black text-sm flex items-center justify-center gap-2 active:scale-[0.97] transition-all",
+                    (addingGenerated || generatedItems.filter((i) => i.included).length === 0) && "opacity-50"
+                  )}
+                >
+                  {addingGenerated ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      Adding to list…
+                    </>
+                  ) : (
+                    <>
+                      <ShoppingBag className="w-4 h-4" />
+                      Add {generatedItems.filter((i) => i.included).length} items to my list
+                    </>
+                  )}
+                </button>
+                <button
+                  onClick={() => setGeneratedItems(null)}
+                  className="w-full text-cubby-taupe py-2 font-black text-sm active:scale-[0.97] transition-transform"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
           ) : (
             <>
-              {/* Smart suggestions from inventory intelligence */}
-              {suggestions.length > 0 && (
-                <div className="space-y-2">
-                  <p className="text-xs font-black text-cubby-taupe uppercase tracking-wider px-1">
-                    💡 Suggested
-                  </p>
-                  <div className="flex gap-2 overflow-x-auto pb-1 -mx-4 px-4 scrollbar-none">
-                    {suggestions.slice(0, 8).map((s) => (
-                      <button
-                        key={s.name}
-                        onClick={() => handleAddSuggestion(s)}
-                        disabled={addingSuggestion === s.name}
-                        className={cn(
-                          "flex-shrink-0 flex items-center gap-1.5 bg-cubby-cream border border-black/5 rounded-full px-3 py-2 text-xs font-black text-cubby-charcoal active:scale-95 transition-all",
-                          addingSuggestion === s.name && "opacity-50"
-                        )}
-                      >
-                        <span>{s.emoji}</span>
-                        <span>{s.name}</span>
-                        <Plus className="w-3 h-3 text-cubby-green" />
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-
+              {/* ── Fill My Trolley CTA (when list is empty or as secondary action) ── */}
               {totalItems === 0 && !showAddForm ? (
-                /* Empty state */
-                <div className="pt-12 text-center space-y-4">
-                  <p className="text-5xl">🛒</p>
-                  <p className="font-black text-cubby-charcoal text-lg">Your list is empty</p>
-                  <p className="text-cubby-taupe text-sm">Add items manually or pull from a recipe in the Cookbook tab.</p>
+                <div className="pt-8 text-center space-y-5">
+                  <div className="w-20 h-20 mx-auto rounded-full bg-cubby-lime/20 flex items-center justify-center">
+                    <Sparkles className="w-10 h-10 text-cubby-green" />
+                  </div>
+                  <div className="space-y-2">
+                    <p className="font-black text-cubby-charcoal text-xl">Ready to shop?</p>
+                    <p className="text-cubby-taupe text-sm leading-relaxed max-w-xs mx-auto">
+                      Cubby learns what you buy, cook, and waste — then builds your perfect weekly shop.
+                    </p>
+                  </div>
+                  <button
+                    onClick={handleGenerate}
+                    className="bg-cubby-green text-white px-8 py-4 rounded-2xl font-black text-base flex items-center gap-3 mx-auto active:scale-95 transition-transform shadow-lg"
+                  >
+                    <Sparkles className="w-5 h-5" />
+                    Fill my trolley
+                  </button>
                   <button
                     onClick={() => setShowAddForm(true)}
-                    className="bg-cubby-green text-white px-6 py-3.5 rounded-2xl font-black text-sm flex items-center gap-2 mx-auto active:scale-95 transition-transform"
+                    className="text-cubby-taupe font-black text-sm active:scale-95 transition-transform"
                   >
-                    <Plus className="w-4 h-4" /> Add first item
+                    or add items manually
                   </button>
                 </div>
               ) : (
                 <>
+                  {/* Smart refill button when list has items */}
+                  {totalItems > 0 && (
+                    <button
+                      onClick={handleGenerate}
+                      className="w-full cubby-card px-4 py-3 flex items-center gap-3 active:scale-[0.98] transition-transform"
+                    >
+                      <div className="w-10 h-10 rounded-xl bg-cubby-lime/25 flex items-center justify-center shrink-0">
+                        <Sparkles className="w-5 h-5 text-cubby-green" />
+                      </div>
+                      <div className="text-left">
+                        <p className="font-black text-cubby-charcoal text-sm">Top up my list</p>
+                        <p className="text-xs text-cubby-taupe">AI suggests what you need this week</p>
+                      </div>
+                    </button>
+                  )}
+
                   {/* Aisle-grouped unchecked items */}
                   {[...aisleGroups.entries()].map(([aisleNum, items]) => (
                     <div key={aisleNum} className="space-y-1">
@@ -517,7 +641,6 @@ export function ShoppingClient() {
               </div>
 
               <div className="flex gap-2">
-                {/* Quantity stepper */}
                 <div className="flex items-center gap-2 bg-cubby-stone rounded-xl px-3 py-2">
                   <button
                     onClick={() => setNewItemQty((q) => Math.max(1, q - 1))}
@@ -533,8 +656,6 @@ export function ShoppingClient() {
                     +
                   </button>
                 </div>
-
-                {/* Category */}
                 <input
                   type="text"
                   placeholder="Category (optional)"
@@ -585,8 +706,8 @@ export function ShoppingClient() {
         </div>
       )}
 
-      {/* ── Floating add button (list tab only) ── */}
-      {tab === "list" && !showAddForm && (
+      {/* ── Floating add button (list tab, only when not generating/reviewing) ── */}
+      {tab === "list" && !showAddForm && !generating && !generatedItems && totalItems > 0 && (
         <div className="fixed bottom-24 right-4">
           <button
             onClick={() => setShowAddForm(true)}
@@ -598,14 +719,16 @@ export function ShoppingClient() {
       )}
 
       {/* ── Refresh button ── */}
-      <div className="fixed bottom-24 left-4">
-        <button
-          onClick={() => { setLoading(true); loadList(); loadRecipes(); }}
-          className="w-10 h-10 bg-cubby-cream rounded-full flex items-center justify-center shadow-sm active:scale-95 transition-transform"
-        >
-          <RefreshCw className="w-4 h-4 text-cubby-taupe" />
-        </button>
-      </div>
+      {!generating && !generatedItems && (
+        <div className="fixed bottom-24 left-4">
+          <button
+            onClick={() => { setLoading(true); loadList(); loadRecipes(); }}
+            className="w-10 h-10 bg-cubby-cream rounded-full flex items-center justify-center shadow-sm active:scale-95 transition-transform"
+          >
+            <RefreshCw className="w-4 h-4 text-cubby-taupe" />
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -625,21 +748,16 @@ function ShoppingItemRow({
 }) {
   return (
     <div className={cn("flex items-center gap-3 px-4 py-3.5 transition-opacity", dimmed && "opacity-50")}>
-      {/* Checkbox */}
       <button
         onMouseDown={(e) => e.preventDefault()}
         onClick={onToggle}
         className={cn(
           "w-6 h-6 rounded-lg border-2 flex items-center justify-center shrink-0 transition-all active:scale-90",
-          item.checked
-            ? "bg-cubby-green border-cubby-green"
-            : "border-cubby-taupe/40"
+          item.checked ? "bg-cubby-green border-cubby-green" : "border-cubby-taupe/40"
         )}
       >
         {item.checked && <Check className="w-3.5 h-3.5 text-white" strokeWidth={3} />}
       </button>
-
-      {/* Name + meta */}
       <div className="flex-1 min-w-0">
         <p className={cn(
           "font-black text-sm text-cubby-charcoal leading-tight",
@@ -653,15 +771,11 @@ function ShoppingItemRow({
           </p>
         )}
       </div>
-
-      {/* Recipe badge */}
       {item.addedFromRecipe && (
         <span className="text-[10px] font-black text-cubby-taupe/60 bg-cubby-stone px-2 py-0.5 rounded-full shrink-0">
           recipe
         </span>
       )}
-
-      {/* Delete */}
       <button
         onClick={onDelete}
         className="text-cubby-taupe/40 hover:text-cubby-urgent transition-colors active:scale-90 shrink-0"
@@ -687,12 +801,10 @@ function RecipeCard({
 
   return (
     <div className="bg-cubby-cream rounded-card overflow-hidden">
-      {/* Recipe header */}
       <button
         onClick={() => setExpanded((e) => !e)}
         className="w-full px-4 py-4 flex items-start gap-3 text-left"
       >
-        {/* Emoji / image placeholder */}
         <div className="w-12 h-12 rounded-2xl bg-cubby-pastel-yellow flex items-center justify-center shrink-0 text-2xl">
           {recipe.imageUrl ? (
             <img src={recipe.imageUrl} alt={recipe.title} className="w-full h-full object-cover rounded-2xl" />
@@ -716,7 +828,6 @@ function RecipeCard({
         </div>
       </button>
 
-      {/* Expanded ingredients list */}
       {expanded && (
         <div className="px-4 pb-2 space-y-1">
           <p className="text-xs font-black text-cubby-taupe uppercase tracking-wider mb-2">Ingredients</p>
@@ -733,16 +844,13 @@ function RecipeCard({
         </div>
       )}
 
-      {/* Add to list button */}
       <div className="px-4 pb-4 pt-2">
         <button
           onClick={onAddToList}
           disabled={isAdding}
           className={cn(
             "w-full py-3 rounded-2xl font-black text-sm flex items-center justify-center gap-2 transition-all active:scale-[0.97]",
-            isAdded
-              ? "bg-cubby-lime text-cubby-green"
-              : "bg-cubby-green text-white",
+            isAdded ? "bg-cubby-lime text-cubby-green" : "bg-cubby-green text-white",
             isAdding && "opacity-60"
           )}
         >
