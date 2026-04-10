@@ -8,9 +8,9 @@
  * Fetches real inventory from /api/inventory and PATCHes status on each swipe.
  */
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { motion, useMotionValue, useTransform, AnimatePresence } from "framer-motion";
-import { RotateCcw } from "lucide-react";
+import { RotateCcw, CalendarPlus } from "lucide-react";
 import { cn, getCategoryEmoji } from "@/lib/utils";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -28,6 +28,7 @@ interface SwipeItem {
   name: string;
   category: string;
   daysLeft: number | null;
+  expiryDate: string | null;
 }
 
 type SwipeAction = "eaten" | "binned" | "still_here" | null;
@@ -83,10 +84,12 @@ async function patchInventoryStatus(
 function SwipeCard({
   item,
   onAction,
+  onExpiryUpdate,
   stackIndex,
 }: {
   item: SwipeItem;
   onAction: (id: string, action: SwipeAction) => void;
+  onExpiryUpdate: (id: string, date: string) => void;
   stackIndex: number;
 }) {
   const x = useMotionValue(0);
@@ -98,11 +101,31 @@ function SwipeCard({
   const binnedOpacity = useTransform(x, [-80, 0], [1, 0]);
   const stillHereOpacity = useTransform(y, [-80, 0], [1, 0]);
 
+  const dateInputRef = useRef<HTMLInputElement>(null);
+
   const handleDragEnd = (_: unknown, info: { offset: { x: number; y: number } }) => {
     if (info.offset.x > 100) onAction(item.id, "eaten");
     else if (info.offset.x < -100) onAction(item.id, "binned");
     else if (info.offset.y < -100) onAction(item.id, "still_here");
   };
+
+  const handleExpiryTap = (e: React.MouseEvent | React.TouchEvent) => {
+    e.stopPropagation();
+    dateInputRef.current?.showPicker?.();
+    dateInputRef.current?.focus();
+  };
+
+  const handleDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    if (val) {
+      onExpiryUpdate(item.id, val);
+    }
+  };
+
+  // Default date for picker: tomorrow
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const tomorrowStr = tomorrow.toISOString().split("T")[0];
 
   return (
     <motion.div
@@ -146,9 +169,36 @@ function SwipeCard({
         <span className="text-6xl">{getCategoryEmoji(item.category)}</span>
         <div className="text-center">
           <p className="font-black text-cubby-charcoal text-xl">{item.name}</p>
-          <p className={cn("text-sm font-semibold mt-1", expiryColor(item.daysLeft))}>
-            {expiryLabel(item.daysLeft)}
-          </p>
+
+          {/* Tappable expiry — opens date picker if no expiry set */}
+          {item.daysLeft === null && stackIndex === 0 ? (
+            <button
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={handleExpiryTap}
+              className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-cubby-stone border border-black/5 active:scale-95 transition-transform"
+            >
+              <CalendarPlus className="w-3.5 h-3.5 text-cubby-green" />
+              <span className="text-xs font-bold text-cubby-green">Add expiry date</span>
+            </button>
+          ) : (
+            <p className={cn("text-sm font-semibold mt-1", expiryColor(item.daysLeft))}>
+              {expiryLabel(item.daysLeft)}
+            </p>
+          )}
+
+          {/* Hidden native date input */}
+          {stackIndex === 0 && (
+            <input
+              ref={dateInputRef}
+              type="date"
+              min={new Date().toISOString().split("T")[0]}
+              defaultValue={item.expiryDate?.split("T")[0] ?? tomorrowStr}
+              onChange={handleDateChange}
+              onPointerDown={(e) => e.stopPropagation()}
+              className="absolute opacity-0 w-0 h-0 pointer-events-none"
+              tabIndex={-1}
+            />
+          )}
         </div>
 
         {stackIndex === 0 && (
@@ -185,6 +235,7 @@ export function SwipeStatusClient() {
           name: item.name,
           category: item.category,
           daysLeft: daysUntil(item.expiryDate),
+          expiryDate: item.expiryDate,
         }));
 
         // Sort: expired first, then by days left ascending, then no-date items
@@ -223,6 +274,34 @@ export function SwipeStatusClient() {
       if (next.length === 0) setTimeout(() => setDone(true), 300);
       return next;
     });
+  };
+
+  const handleExpiryUpdate = async (id: string, dateStr: string) => {
+    const isoDate = new Date(dateStr + "T00:00:00.000Z").toISOString();
+    const days = daysUntil(dateStr);
+
+    // Update local state immediately
+    setItems((prev) =>
+      prev.map((item) =>
+        item.id === id ? { ...item, expiryDate: isoDate, daysLeft: days } : item
+      )
+    );
+    setAllItems((prev) =>
+      prev.map((item) =>
+        item.id === id ? { ...item, expiryDate: isoDate, daysLeft: days } : item
+      )
+    );
+
+    // Persist to API
+    try {
+      await fetch(`/api/inventory/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ expiryDate: isoDate }),
+      });
+    } catch {
+      // Best-effort
+    }
   };
 
   const handleUndo = () => {
@@ -356,6 +435,7 @@ export function SwipeStatusClient() {
                 key={item.id}
                 item={item}
                 onAction={handleAction}
+                onExpiryUpdate={handleExpiryUpdate}
                 stackIndex={i}
               />
             ))}
