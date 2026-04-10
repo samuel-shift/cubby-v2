@@ -536,7 +536,7 @@ export function KitchenSnapshotClient() {
 
   if (phase === "preview" && previewDataUrl) {
     return (
-      <div className="relative flex min-h-screen flex-col bg-black">
+      <div className="fixed inset-0 z-[60] flex flex-col bg-black overflow-hidden">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={previewDataUrl}
@@ -750,7 +750,7 @@ export function KitchenSnapshotClient() {
   // ─── Render: Camera viewfinder ────────────────────────────────────────────
 
   return (
-    <div className="relative flex min-h-screen flex-col bg-black">
+    <div className="fixed inset-0 z-[60] flex flex-col bg-black overflow-hidden">
       {/* Hidden utilities */}
       <canvas ref={canvasRef} className="hidden" />
       <input
